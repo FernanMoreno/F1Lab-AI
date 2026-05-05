@@ -12,7 +12,6 @@ import pandas as pd
 
 from reglabsim.data.base import FetchError, SessionQuery
 
-
 SESSION_NAME_MAP = {
     "race": "Race",
     "quali": "Qualifying",
@@ -161,6 +160,14 @@ class OpenF1Client:
             params["driver_number"] = int(driver_id)
         return self._frame(self._get_json("stints", params), "stints")
 
+    def fetch_position(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        """Fetch position trace for one session and optional driver."""
+        self._ensure_connected()
+        params: dict[str, Any] = {"session_key": int(session_id)}
+        if driver_id is not None:
+            params["driver_number"] = int(driver_id)
+        return self._frame(self._get_json("position", params), "position")
+
     def fetch_race_control(self, session_id: str) -> pd.DataFrame:
         """Fetch race-control messages for one session."""
         self._ensure_connected()
@@ -176,6 +183,7 @@ class OpenF1Client:
             "weather": self.fetch_weather(session_key),
             "race_control": self.fetch_race_control(session_key),
             "stints": self.fetch_stints(session_key),
+            "position": self.fetch_position(session_key),
         }
         if query.driver_numbers:
             telemetry_frames = []

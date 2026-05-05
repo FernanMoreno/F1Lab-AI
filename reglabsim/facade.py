@@ -11,7 +11,12 @@ import yaml
 from reglabsim.campaigns.runner import CampaignRunner
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.conditions.repository import ConditionProfileRepository
-from reglabsim.conditions.scenarios import ConditionsScenario, ForecastState, TrackState, WeatherState
+from reglabsim.conditions.scenarios import (
+    ConditionsScenario,
+    ForecastState,
+    TrackState,
+    WeatherState,
+)
 from reglabsim.data import (
     FastF1Client,
     JolpicaClient,
@@ -25,7 +30,9 @@ from reglabsim.failures.classifier import FailureClassifier
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
+from reglabsim.track.builder import GeospatialTrackBuilder
 from reglabsim.track.track_loader import TrackRepository
+from reglabsim.validation.primitives import PublicPrimitiveCalibrator
 from reglabsim.validation.public_session import PublicSessionValidator
 from reglabsim.vehicle.car_family import CarFamily
 
@@ -147,6 +154,19 @@ class SimulationFacadeImpl:
             client.connect()
             self._openmeteo_client = client
         return self._openmeteo_client
+
+    def _track_builder(self) -> GeospatialTrackBuilder:
+        return GeospatialTrackBuilder(self._config_dir / "tracks")
+
+    def _primitive_calibrator(self, data_root: str = "data") -> PublicPrimitiveCalibrator:
+        self._ensure_regulations_loaded()
+        self._ensure_car_families_loaded()
+        return PublicPrimitiveCalibrator(
+            data_root=data_root,
+            track_repository=self._track_repo,
+            regulations={key: deepcopy(value) for key, value in self._regulation_payloads.items()},
+            car_families={key: deepcopy(value) for key, value in self._car_family_payloads.items()},
+        )
 
     # ------------------------------------------------------------------
     # Public registry API
@@ -326,6 +346,177 @@ class SimulationFacadeImpl:
             "saved_path": saved_path,
             "ingestion": ingestion,
         }
+
+    def build_track_seed(
+        self,
+        *,
+        track_id: str,
+        name: str,
+        country: str,
+        source_kind: str,
+        seed_path: str | Path | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        turns: int | None = None,
+        laps: int | None = None,
+        race_distance_m: float | None = None,
+        avg_speed_kph: float = 200.0,
+        fidelity_level: int = 2,
+        output_path: str | Path | None = None,
+        sources: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build and persist one track YAML seed from CSV, GeoJSON or OSM."""
+        metadata: dict[str, Any] = {
+            "name": name,
+            "country": country,
+            "avg_speed_kph": avg_speed_kph,
+        }
+        if latitude is not None:
+            metadata["latitude"] = latitude
+        if longitude is not None:
+            metadata["longitude"] = longitude
+        builder = self._track_builder()
+        if source_kind == "csv":
+            if seed_path is None:
+                raise ValueError("seed_path is required for source_kind='csv'")
+            payload = builder.build_from_csv(
+                track_id=track_id,
+                csv_path=seed_path,
+                metadata=metadata,
+                turns=turns,
+                laps=laps,
+                race_distance_m=race_distance_m,
+                fidelity_level=fidelity_level,
+                sources=sources or ["tum_or_curated_csv", "generated_seed"],
+                validation_status="generated_seed",
+            )
+        elif source_kind == "geojson":
+            if seed_path is None:
+                raise ValueError("seed_path is required for source_kind='geojson'")
+            payload = builder.build_from_geojson(
+                track_id=track_id,
+                geojson_path=seed_path,
+                metadata=metadata,
+                turns=turns,
+                laps=laps,
+                race_distance_m=race_distance_m,
+                fidelity_level=fidelity_level,
+                sources=sources or ["geojson_centerline", "generated_seed"],
+                validation_status="generated_seed",
+            )
+        elif source_kind == "osm":
+            if latitude is None or longitude is None:
+                raise ValueError("latitude and longitude are required for source_kind='osm'")
+            payload = builder.build_from_osm(
+                track_id=track_id,
+                metadata=metadata,
+                latitude=latitude,
+                longitude=longitude,
+                turns=turns,
+                laps=laps,
+                race_distance_m=race_distance_m,
+                fidelity_level=fidelity_level,
+                validation_status="generated_seed",
+            )
+        else:
+            raise ValueError(f"Unsupported source_kind '{source_kind}'")
+
+        saved_path = builder.save_yaml(payload, output_path)
+        summary = {
+            "track_id": payload["track_id"],
+            "name": payload["name"],
+            "country": payload["country"],
+            "length_m": payload["length_m"],
+            "turns": payload["turns"],
+            "fidelity_level": payload["fidelity_level"],
+            "sources": payload["sources"],
+            "validation_status": payload["validation_status"],
+            "fidelity_notes": payload["fidelity_notes"],
+            "metadata": payload["metadata"],
+            "segments": [segment["id"] for segment in payload["segments"]],
+        }
+        if output_path is None:
+            self._track_repo = TrackRepository(self._config_dir / "tracks")
+            summary = self.describe_track(track_id)
+        return {
+            "track_id": track_id,
+            "saved_path": str(saved_path),
+            "summary": summary,
+        }
+
+    def calibrate_public_lap(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        regulation_id: str = "regulation_2026_refined",
+        data_root: str = "data",
+        driver_numbers: list[int] | None = None,
+        candidate_families: list[str] | None = None,
+        output_dir: str | Path | None = None,
+        ingest_if_missing: bool = True,
+    ) -> dict[str, Any]:
+        """Calibrate the lap primitive against an ingested public session."""
+        if ingest_if_missing:
+            self.ingest_public_session_data(
+                year=year,
+                track_id=track_id,
+                session_type=session_type,
+                driver_numbers=driver_numbers or [],
+                data_root=data_root,
+            )
+        calibrator = self._primitive_calibrator(data_root=data_root)
+        return calibrator.calibrate_lap(
+            query=SessionQuery(
+                year=year,
+                track_id=track_id,
+                session_type=session_type,
+                driver_numbers=driver_numbers or [],
+            ),
+            regulation_id=regulation_id,
+            candidate_families=candidate_families,
+            output_dir=output_dir,
+        )
+
+    def calibrate_public_battle(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        regulation_id: str = "regulation_2026_refined",
+        data_root: str = "data",
+        driver_numbers: list[int] | None = None,
+        mode: str = "llm_event_driven",
+        num_cars: int = 6,
+        laps: int | None = None,
+        output_dir: str | Path | None = None,
+        ingest_if_missing: bool = True,
+    ) -> dict[str, Any]:
+        """Calibrate the battle primitive against an ingested public session."""
+        if ingest_if_missing:
+            self.ingest_public_session_data(
+                year=year,
+                track_id=track_id,
+                session_type=session_type,
+                driver_numbers=driver_numbers or [],
+                data_root=data_root,
+            )
+        calibrator = self._primitive_calibrator(data_root=data_root)
+        return calibrator.calibrate_battle(
+            query=SessionQuery(
+                year=year,
+                track_id=track_id,
+                session_type=session_type,
+                driver_numbers=driver_numbers or [],
+            ),
+            regulation_id=regulation_id,
+            mode=mode,
+            num_cars=num_cars,
+            laps=laps,
+            output_dir=output_dir,
+        )
 
     # ------------------------------------------------------------------
     # Legacy experiment compatibility

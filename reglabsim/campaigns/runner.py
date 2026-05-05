@@ -89,7 +89,11 @@ class CampaignRunner:
         arbitrator = ActionArbitrator()
         validator = ActionValidator()
         steward = StewardEngine(enforcement)
-        microkernel = RaceMicrokernel(regulation=regulation, seed=spec.seed)
+        microkernel = RaceMicrokernel(
+            regulation=regulation,
+            seed=spec.seed,
+            battle_calibration=spec.battle_calibration_profile,
+        )
 
         team_agents, driver_agents = self._build_agents(spec, replay_actions)
         weather = spec.conditions.weather

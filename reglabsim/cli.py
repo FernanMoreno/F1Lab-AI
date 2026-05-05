@@ -97,6 +97,102 @@ def show_condition_profile(profile_id: str = typer.Argument(..., help="Condition
     typer.echo(json.dumps(facade.load_condition_profile(profile_id), indent=2))
 
 
+@app.command("build-track-seed")
+def build_track_seed(
+    track_id: str = typer.Argument(..., help="Track id"),
+    name: str = typer.Argument(..., help="Track display name"),
+    country: str = typer.Argument(..., help="Country"),
+    source_kind: str = typer.Option(..., help="One of: csv, geojson, osm"),
+    seed_path: Path | None = typer.Option(None, help="CSV or GeoJSON centerline path"),
+    latitude: float | None = typer.Option(None, help="Track latitude, required for OSM"),
+    longitude: float | None = typer.Option(None, help="Track longitude, required for OSM"),
+    turns: int | None = typer.Option(None, help="Expected turn count"),
+    laps: int | None = typer.Option(None, help="Race lap count"),
+    race_distance_m: float | None = typer.Option(None, help="Race distance in meters"),
+    avg_speed_kph: float = typer.Option(200.0, help="Reference average speed"),
+    fidelity_level: int = typer.Option(2, help="Generated track fidelity level"),
+    output_path: Path | None = typer.Option(None, help="Optional output YAML path"),
+) -> None:
+    facade = create_facade()
+    result = facade.build_track_seed(
+        track_id=track_id,
+        name=name,
+        country=country,
+        source_kind=source_kind,
+        seed_path=seed_path,
+        latitude=latitude,
+        longitude=longitude,
+        turns=turns,
+        laps=laps,
+        race_distance_m=race_distance_m,
+        avg_speed_kph=avg_speed_kph,
+        fidelity_level=fidelity_level,
+        output_path=output_path,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("calibrate-public-lap")
+def calibrate_public_lap(
+    year: int = typer.Argument(..., help="Season year"),
+    track_id: str = typer.Argument(..., help="Track id"),
+    session_type: str = typer.Argument(..., help="Session type"),
+    regulation_id: str = typer.Option("regulation_2026_refined", help="Regulation id"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+    drivers: str = typer.Option("", help="Comma-separated driver numbers"),
+    families: str = typer.Option("", help="Comma-separated candidate car families"),
+    output_dir: Path | None = typer.Option(None, help="Optional report/profile output directory"),
+    ingest_if_missing: bool = typer.Option(True, help="Fetch public session bundle before calibrating"),
+) -> None:
+    facade = create_facade()
+    driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
+    candidate_families = [value.strip() for value in families.split(",") if value.strip()]
+    result = facade.calibrate_public_lap(
+        year=year,
+        track_id=track_id,
+        session_type=session_type,
+        regulation_id=regulation_id,
+        data_root=data_root,
+        driver_numbers=driver_numbers,
+        candidate_families=candidate_families or None,
+        output_dir=output_dir,
+        ingest_if_missing=ingest_if_missing,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("calibrate-public-battle")
+def calibrate_public_battle(
+    year: int = typer.Argument(..., help="Season year"),
+    track_id: str = typer.Argument(..., help="Track id"),
+    session_type: str = typer.Argument(..., help="Session type"),
+    regulation_id: str = typer.Option("regulation_2026_refined", help="Regulation id"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+    drivers: str = typer.Option("", help="Comma-separated driver numbers"),
+    mode: str = typer.Option("llm_event_driven", help="Runtime mode for calibration runs"),
+    num_cars: int = typer.Option(6, help="Calibration pack size"),
+    laps: int | None = typer.Option(None, help="Override representative lap count"),
+    output_dir: Path | None = typer.Option(None, help="Optional report/profile output directory"),
+    ingest_if_missing: bool = typer.Option(True, help="Fetch public session bundle before calibrating"),
+) -> None:
+    facade = create_facade()
+    driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
+    result = facade.calibrate_public_battle(
+        year=year,
+        track_id=track_id,
+        session_type=session_type,
+        regulation_id=regulation_id,
+        data_root=data_root,
+        driver_numbers=driver_numbers,
+        mode=mode,
+        num_cars=num_cars,
+        laps=laps,
+        output_dir=output_dir,
+        ingest_if_missing=ingest_if_missing,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
 @app.command("run-multiagent-race")
 def run_multiagent_race(
     config: Path = typer.Argument(..., exists=True, readable=True),

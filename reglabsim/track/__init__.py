@@ -1,5 +1,6 @@
 """Digital track layer."""
 
+from reglabsim.track.builder import GeospatialTrackBuilder, TrackPoint
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskAssessment, LocalRiskModel
 from reglabsim.track.segments import (
@@ -13,6 +14,7 @@ from reglabsim.track.segments import (
 from reglabsim.track.track_loader import TrackRepository
 
 __all__ = [
+    "GeospatialTrackBuilder",
     "KerbProfile",
     "LocalRiskAssessment",
     "LocalRiskModel",
@@ -20,6 +22,7 @@ __all__ = [
     "SegmentRiskProfile",
     "TrackLimitProfile",
     "TrackModel",
+    "TrackPoint",
     "TrackRepository",
     "TrackSegment",
     "TrackSurface",

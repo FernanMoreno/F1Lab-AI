@@ -10,10 +10,14 @@ from typing import Any
 
 import yaml
 
-from reglabsim.conditions.repository import ConditionProfileRepository
 from reglabsim.conditions.forecast import default_forecast
-from reglabsim.conditions.scenarios import ConditionsScenario, ForecastState, TrackState, WeatherState
-
+from reglabsim.conditions.repository import ConditionProfileRepository
+from reglabsim.conditions.scenarios import (
+    ConditionsScenario,
+    ForecastState,
+    TrackState,
+    WeatherState,
+)
 
 SCALE_PRESETS = {
     "micro": {"num_cars": 2, "laps": 4},
@@ -50,6 +54,8 @@ class CampaignSpec:
     steward_policy_version: str = "steward.v1"
     data_version: str = "synthetic-public.v1"
     weather_profile: str = "inline"
+    lap_calibration_profile: dict[str, float] = field(default_factory=dict)
+    battle_calibration_profile: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> CampaignSpec:
@@ -109,6 +115,8 @@ class CampaignSpec:
             steward_policy_version=data.get("steward_policy_version", "steward.v1"),
             data_version=data.get("data_version", "synthetic-public.v1"),
             weather_profile=data.get("weather_profile", "inline"),
+            lap_calibration_profile=dict(data.get("lap_calibration_profile", {})),
+            battle_calibration_profile=dict(data.get("battle_calibration_profile", {})),
         )
 
     @staticmethod

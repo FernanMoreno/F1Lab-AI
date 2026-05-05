@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import asdict
 from typing import Any
 
 import numpy as np
 
-from reglabsim.conditions.scenarios import ConditionsEvolutionModel, ForecastState, TrackState, WeatherState
+from reglabsim.conditions.scenarios import (
+    ConditionsEvolutionModel,
+    TrackState,
+    WeatherState,
+)
 from reglabsim.runtime.schema import CarRuntimeState, RaceAction, RaceEvent, RaceStateSnapshot
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskModel
 from reglabsim.vehicle.ers import ERSModel
 from reglabsim.vehicle.tyres import TyreModel, TyreState
-
 
 PACE_BONUS = {
     "conserve": 0.55,
@@ -34,16 +36,31 @@ RISK_NUMERIC = {
     "high": 0.7,
     "critical": 0.9,
 }
+DEFAULT_BATTLE_CALIBRATION = {
+    "pace_delta_scale": 1.0,
+    "closing_speed_scale": 1.0,
+    "incident_risk_scale": 1.0,
+    "track_limit_scale": 1.0,
+}
 
 
 class RaceMicrokernel:
     """Single mutator of race state."""
 
-    def __init__(self, regulation: dict[str, Any], seed: int):
+    def __init__(
+        self,
+        regulation: dict[str, Any],
+        seed: int,
+        battle_calibration: dict[str, float] | None = None,
+    ):
         self._regulation = regulation
         self._rng = np.random.default_rng(seed)
         self._evolution = ConditionsEvolutionModel()
         self._risk_model = LocalRiskModel()
+        self._battle_calibration = {
+            **DEFAULT_BATTLE_CALIBRATION,
+            **(battle_calibration or {}),
+        }
 
     def snapshot(
         self,
@@ -120,8 +137,8 @@ class RaceMicrokernel:
             condition_penalty = track_state.cooling_penalty * 3.0 + max(0.0, weather.wind_speed_mps - 5.0) * 0.05
             wet_penalty = track_state.wetness_level * 2.2
             grip_bonus = (1.0 - grip_factor) * 3.4
-            pace_bonus = PACE_BONUS.get(action.pace_mode, 0.0)
-            ers_bonus = ERS_BONUS.get(action.ers_mode, 0.0)
+            pace_bonus = PACE_BONUS.get(action.pace_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
+            ers_bonus = ERS_BONUS.get(action.ers_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
             safety_penalty = 18.0 if safety_car_active else 0.0
             pit_penalty = self._pit_stop_penalty(track.track_id) if action.pit_this_lap else 0.0
             random_noise = float(self._rng.normal(0.0, 0.12))
@@ -211,7 +228,9 @@ class RaceMicrokernel:
                     )
                 )
             if segment.track_limits and action.risk_level > 0.72 and action.attack:
-                breach_probability = 0.22 + track_state.wetness_level * 0.12 + car.tyre_wear * 0.18
+                breach_probability = (
+                    0.22 + track_state.wetness_level * 0.12 + car.tyre_wear * 0.18
+                ) * self._battle_calibration["track_limit_scale"]
                 if self._rng.random() < breach_probability:
                     wheels_out = 4 if self._rng.random() > 0.35 else 2
                     if wheels_out > segment.track_limits.allowed_wheels_out:
@@ -267,7 +286,19 @@ class RaceMicrokernel:
             if old_position != car.position:
                 attacker = car if old_position > car.position else active_cars[index - 2]
                 defender = active_cars[index - 2] if old_position > car.position else car
-                closing_speed_kph = max(0.0, (PACE_BONUS.get(actions[attacker.car_id].pace_mode, 0.0) - PACE_BONUS.get(actions[defender.car_id].pace_mode, 0.0)) * -60.0 + (actions[attacker.car_id].risk_level - actions[defender.car_id].risk_level) * 40.0 + 20.0)
+                closing_speed_kph = max(
+                    0.0,
+                    (
+                        (
+                            PACE_BONUS.get(actions[attacker.car_id].pace_mode, 0.0)
+                            - PACE_BONUS.get(actions[defender.car_id].pace_mode, 0.0)
+                        )
+                        * -60.0
+                        + (actions[attacker.car_id].risk_level - actions[defender.car_id].risk_level) * 40.0
+                        + 20.0
+                    )
+                    * self._battle_calibration["closing_speed_scale"],
+                )
                 energy_delta_mj = (attacker.ers_soc - defender.ers_soc) * float(self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0))
                 risk = self._risk_model.evaluate(
                     segment=high_risk_segment if closing_speed_kph > segment.risk.unsafe_closing_speed_threshold_kph else segment,
@@ -287,9 +318,11 @@ class RaceMicrokernel:
                     "accident_risk": risk.accident_risk,
                     "recommended_failure_tags": risk.recommended_failure_tags,
                 }
-                if risk.accident_risk > 0.88:
+                adjusted_risk = min(1.0, risk.accident_risk * self._battle_calibration["incident_risk_scale"])
+                details["accident_risk_adjusted"] = adjusted_risk
+                if adjusted_risk > 0.88:
                     event_type = "incident"
-                    if self._rng.random() < min(0.95, risk.accident_risk):
+                    if self._rng.random() < min(0.95, adjusted_risk):
                         defender.damage = min(1.0, defender.damage + 0.22)
                         attacker.damage = min(1.0, attacker.damage + 0.14)
                         details["impact_severity"] = risk.impact_severity_estimate

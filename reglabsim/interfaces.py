@@ -11,7 +11,8 @@ Architecture Note:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +73,7 @@ class DataSource(DataSourceBase):
         self,
         driver_id: str,
         session_id: str,
-        laps: Optional[List[int]] = None,
+        laps: list[int] | None = None,
     ) -> DataFrame:
         """Fetch telemetry data for specific driver and session.
 
@@ -133,7 +134,7 @@ class CircuitBase(Protocol):
         """Number of DRS zones."""
         ...
 
-    def get_segment(self, distance_m: float) -> Dict[str, Any]:
+    def get_segment(self, distance_m: float) -> dict[str, Any]:
         """Get track segment properties at given distance.
 
         Args:
@@ -237,8 +238,8 @@ class LapSimulatorBase(Protocol):
         tyre_age_laps: int,
         fuel_mass_kg: float,
         ers_soc: float,
-        rng: Optional[NumpyRNG] = None,
-    ) -> Dict[str, Any]:
+        rng: NumpyRNG | None = None,
+    ) -> dict[str, Any]:
         """Simulate a single lap.
 
         Args:
@@ -261,7 +262,7 @@ class LapSimulatorBase(Protocol):
         vehicle: VehicleBase,
         regulation: Regulation,
         track_circuit: CircuitBase,
-    ) -> List[float]:
+    ) -> list[float]:
         """Generate target speed profile for track.
 
         Args:
@@ -288,11 +289,11 @@ class RaceSimulatorBase(Protocol):
         self,
         regulation: Regulation,
         circuit: CircuitBase,
-        cars: List[Dict[str, Any]],
+        cars: list[dict[str, Any]],
         conditions: WeatherCondition,
-        config: Dict[str, Any],
-        rng: Optional[NumpyRNG] = None,
-    ) -> Dict[str, Any]:
+        config: dict[str, Any],
+        rng: NumpyRNG | None = None,
+    ) -> dict[str, Any]:
         """Simulate a complete race.
 
         Args:
@@ -310,14 +311,14 @@ class RaceSimulatorBase(Protocol):
 
     def simulate_battle(
         self,
-        attacker: Dict[str, Any],
-        defender: Dict[str, Any],
+        attacker: dict[str, Any],
+        defender: dict[str, Any],
         regulation: Regulation,
         circuit: CircuitBase,
         conditions: WeatherCondition,
         laps: int,
-        rng: Optional[NumpyRNG] = None,
-    ) -> Dict[str, Any]:
+        rng: NumpyRNG | None = None,
+    ) -> dict[str, Any]:
         """Simulate a two-car battle.
 
         Args:
@@ -353,7 +354,7 @@ class MetricBase(Protocol):
         """Human-readable description."""
         ...
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate metric value from simulation output.
 
         Args:
@@ -388,11 +389,11 @@ class MetricRegistry(Protocol):
         """Get metric by name."""
         ...
 
-    def list_metrics(self) -> List[str]:
+    def list_metrics(self) -> list[str]:
         """List all registered metric names."""
         ...
 
-    def calculate_all(self, simulation_output: Dict[str, Any]) -> Dict[str, float]:
+    def calculate_all(self, simulation_output: dict[str, Any]) -> dict[str, float]:
         """Calculate all registered metrics."""
         ...
 
@@ -408,12 +409,12 @@ class OptimizerBase(Protocol):
 
     def optimize(
         self,
-        objective_fn: Callable[[Dict[str, Any]], float],
-        search_space: Dict[str, Any],
-        constraints: Optional[List[Callable[[Dict[str, Any]], bool]]] = None,
+        objective_fn: Callable[[dict[str, Any]], float],
+        search_space: dict[str, Any],
+        constraints: list[Callable[[dict[str, Any]], bool]] | None = None,
         n_trials: int = 100,
-        rng: Optional[NumpyRNG] = None,
-    ) -> Dict[str, Any]:
+        rng: NumpyRNG | None = None,
+    ) -> dict[str, Any]:
         """Run optimization.
 
         Args:
@@ -448,8 +449,8 @@ class SimulationFacade(Protocol):
         regulation_id: str,
         car_family_id: str,
         circuit_id: str,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Run a single lap experiment.
 
         Args:
@@ -467,8 +468,8 @@ class SimulationFacade(Protocol):
     def run_battle_experiment(
         self,
         config_path: str | Path,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Run a two-car battle experiment.
 
         Args:
@@ -483,8 +484,8 @@ class SimulationFacade(Protocol):
     def run_race_experiment(
         self,
         config_path: str | Path,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Run a full race experiment.
 
         Args:
@@ -498,9 +499,9 @@ class SimulationFacade(Protocol):
 
     def compute_metrics(
         self,
-        simulation_output: Dict[str, Any],
-        metric_names: Optional[List[str]] = None,
-    ) -> Dict[str, float]:
+        simulation_output: dict[str, Any],
+        metric_names: list[str] | None = None,
+    ) -> dict[str, float]:
         """Compute metrics from simulation output.
 
         Args:
@@ -518,8 +519,8 @@ class SimulationFacade(Protocol):
         regulation_b: str,
         experiment_config: str | Path,
         n_repetitions: int = 100,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Compare two regulations using same experiment.
 
         Args:
@@ -534,15 +535,15 @@ class SimulationFacade(Protocol):
         """
         ...
 
-    def list_regulations(self) -> List[str]:
+    def list_regulations(self) -> list[str]:
         """List available regulation IDs."""
         ...
 
-    def list_car_families(self) -> List[str]:
+    def list_car_families(self) -> list[str]:
         """List available car family IDs."""
         ...
 
-    def list_circuits(self) -> List[str]:
+    def list_circuits(self) -> list[str]:
         """List available circuit IDs."""
         ...
 
@@ -571,41 +572,41 @@ class SimulationFacade(Protocol):
     def run_multiagent_race(
         self,
         config_path: str | Path,
-        mode: Optional[str] = None,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        mode: str | None = None,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Run a multiagent race from campaign YAML."""
         ...
 
     def run_redteam_campaign(
         self,
         config_path: str | Path,
-        budget: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        budget: int | None = None,
+    ) -> dict[str, Any]:
         """Run a multi-run red-team campaign."""
         ...
 
     def replay_race(
         self,
-        run_output_or_path: Dict[str, Any] | str | Path,
+        run_output_or_path: dict[str, Any] | str | Path,
         mode: str = "replay_audit_exact",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Replay or re-simulate a saved run."""
         ...
 
-    def classify_failures(self, run_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def classify_failures(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         """Classify run failures from logged events."""
         ...
 
-    def propose_mitigations(self, run_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def propose_mitigations(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         """Generate counterfactual mitigation candidates and reruns."""
         ...
 
-    def describe_track(self, track_id: str) -> Dict[str, Any]:
+    def describe_track(self, track_id: str) -> dict[str, Any]:
         """Return track provenance and topology metadata."""
         ...
 
-    def load_condition_profile(self, profile_id: str) -> Dict[str, Any]:
+    def load_condition_profile(self, profile_id: str) -> dict[str, Any]:
         """Load one named condition profile."""
         ...
 
@@ -615,9 +616,9 @@ class SimulationFacade(Protocol):
         year: int,
         track_id: str,
         session_type: str,
-        driver_numbers: Optional[List[int]] = None,
+        driver_numbers: list[int] | None = None,
         data_root: str = "data",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Ingest one public session bundle into the local data lake."""
         ...
 
@@ -628,7 +629,7 @@ class SimulationFacade(Protocol):
         start_date: str,
         end_date: str,
         data_root: str = "data",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Ingest historical weather into the local data lake."""
         ...
 
@@ -638,10 +639,10 @@ class SimulationFacade(Protocol):
         track_id: str,
         start_date: str,
         end_date: str,
-        profile_id: Optional[str] = None,
+        profile_id: str | None = None,
         save_profile: bool = True,
         data_root: str = "data",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a reusable conditions profile from historical weather."""
         ...
 
@@ -653,9 +654,49 @@ class SimulationFacade(Protocol):
         track_id: str,
         session_type: str,
         data_root: str = "data",
-        driver_numbers: Optional[List[int]] = None,
-    ) -> Dict[str, Any]:
+        driver_numbers: list[int] | None = None,
+    ) -> dict[str, Any]:
         """Validate one campaign config against an ingested public session."""
+        ...
+
+    def build_track_seed(
+        self,
+        *,
+        track_id: str,
+        name: str,
+        country: str,
+        source_kind: str,
+        seed_path: str | Path | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> dict[str, Any]:
+        """Build and persist one track YAML seed from geospatial inputs."""
+        ...
+
+    def calibrate_public_lap(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        regulation_id: str = "regulation_2026_refined",
+        data_root: str = "data",
+        driver_numbers: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Calibrate lap-level primitives against public session data."""
+        ...
+
+    def calibrate_public_battle(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        regulation_id: str = "regulation_2026_refined",
+        data_root: str = "data",
+        driver_numbers: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Calibrate battle-level primitives against public session data."""
         ...
 
 
@@ -664,7 +705,7 @@ class SimulationFacade(Protocol):
 # =============================================================================
 
 
-SimulationOutput = Dict[str, Any]
-ExperimentConfig = Dict[str, Any]
-ParameterSpace = Dict[str, Any]
-ConstraintFn = Callable[[Dict[str, Any]], bool]
+SimulationOutput = dict[str, Any]
+ExperimentConfig = dict[str, Any]
+ParameterSpace = dict[str, Any]
+ConstraintFn = Callable[[dict[str, Any]], bool]
