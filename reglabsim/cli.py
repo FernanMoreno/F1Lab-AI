@@ -12,6 +12,53 @@ from reglabsim.facade import create_facade
 app = typer.Typer(add_completion=False, help="F1Lab-AI simulation CLI")
 
 
+@app.command("ingest-session-data")
+def ingest_session_data(
+    year: int = typer.Argument(..., help="Season year"),
+    track_id: str = typer.Argument(..., help="Track id, e.g. suzuka"),
+    session_type: str = typer.Argument(..., help="Session type, e.g. race or quali"),
+    drivers: str = typer.Option("", help="Comma-separated driver numbers"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+) -> None:
+    facade = create_facade()
+    driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
+    result = facade.ingest_public_session_data(
+        year=year,
+        track_id=track_id,
+        session_type=session_type,
+        driver_numbers=driver_numbers,
+        data_root=data_root,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("ingest-weekend-results")
+def ingest_weekend_results(
+    season: int = typer.Argument(..., help="Season year"),
+    round_num: int = typer.Argument(..., help="Round number"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+) -> None:
+    facade = create_facade()
+    result = facade.ingest_public_weekend_results(
+        season=season,
+        round_num=round_num,
+        data_root=data_root,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("describe-track")
+def describe_track(track_id: str = typer.Argument(..., help="Track id")) -> None:
+    facade = create_facade()
+    typer.echo(json.dumps(facade.describe_track(track_id), indent=2))
+
+
+@app.command("show-condition-profile")
+def show_condition_profile(profile_id: str = typer.Argument(..., help="Condition profile id")) -> None:
+    facade = create_facade()
+    typer.echo(json.dumps(facade.load_condition_profile(profile_id), indent=2))
+
+
 @app.command("run-multiagent-race")
 def run_multiagent_race(
     config: Path = typer.Argument(..., exists=True, readable=True),

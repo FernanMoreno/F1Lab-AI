@@ -7,6 +7,19 @@ laps: 53
 race_distance_m: 307471
 avg_speed_kph: 220
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - tum_racetrack_database_seed
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - L1-L3 encoded manually from public references.
+  - L4 target still pending richer kerb/runoff geometry.
+metadata:
+  track_family: high_speed_technical
+  local_risk_focus:
+    - spoon_entry
+    - 130r
 segments:
   - id: suzuka_start_finish
     name: Start Finish Straight

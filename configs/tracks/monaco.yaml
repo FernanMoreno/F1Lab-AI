@@ -7,6 +7,17 @@ laps: 78
 race_distance_m: 263538
 avg_speed_kph: 160
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - Wall proximity and train-risk emphasis.
+metadata:
+  track_family: narrow_street
+  local_risk_focus:
+    - monaco_sainte_devote
+    - monaco_harbour_chicane
 segments:
   - id: monaco_sainte_devote
     name: Sainte Devote

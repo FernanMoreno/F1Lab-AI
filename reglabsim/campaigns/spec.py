@@ -10,6 +10,7 @@ from typing import Any
 
 import yaml
 
+from reglabsim.conditions.repository import ConditionProfileRepository
 from reglabsim.conditions.forecast import default_forecast
 from reglabsim.conditions.scenarios import ConditionsScenario, ForecastState, TrackState, WeatherState
 
@@ -54,6 +55,26 @@ class CampaignSpec:
     def from_yaml(cls, path: str | Path) -> CampaignSpec:
         with open(path, encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
+        path_obj = Path(path)
+        conditions_dir = path_obj.parent.parent / "conditions"
+        if not conditions_dir.exists():
+            conditions_dir = Path("configs/conditions")
+        repository = ConditionProfileRepository(conditions_dir)
+        profile_id = data.get("weather_profile")
+        inline_conditions = data.get("conditions", {})
+        inline_forecast = data.get("forecast", {})
+        if profile_id or inline_conditions:
+            data["conditions"] = repository.merge_inline(
+                profile_id=profile_id,
+                inline_conditions=inline_conditions,
+                inline_forecast=inline_forecast,
+            )
+        elif inline_forecast:
+            data["conditions"] = repository.merge_inline(
+                profile_id=None,
+                inline_conditions={},
+                inline_forecast=inline_forecast,
+            )
         return cls.from_dict(data)
 
     @classmethod
@@ -92,6 +113,8 @@ class CampaignSpec:
 
     @staticmethod
     def _parse_conditions(conditions: dict[str, Any], forecast_data: dict[str, Any]) -> ConditionsScenario:
+        if isinstance(conditions, ConditionsScenario):
+            return conditions
         nested_weather = conditions.get("weather", {})
         nested_track = conditions.get("track", {})
         nested_forecast = conditions.get("forecast", {})

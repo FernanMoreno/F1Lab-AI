@@ -1,112 +1,159 @@
-"""FastF1 data client.
-
-Provides access to F1 timing and telemetry data via FastF1 library.
-"""
+"""Optional FastF1 client for telemetry-rich public sessions."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
-if TYPE_CHECKING:
-    import pandas as pd
+import pandas as pd
+
+from reglabsim.data.base import FetchError
+
+
+FASTF1_SESSION_MAP = {
+    "race": "R",
+    "quali": "Q",
+    "qualifying": "Q",
+    "fp1": "FP1",
+    "fp2": "FP2",
+    "fp3": "FP3",
+    "sprint": "S",
+    "sprint_shootout": "SQ",
+}
+
+FASTF1_TRACK_MAP = {
+    "austria": "Austria",
+    "baku": "Azerbaijan",
+    "barcelona": "Spain",
+    "monaco": "Monaco",
+    "monza": "Italy",
+    "silverstone": "Great Britain",
+    "singapore": "Singapore",
+    "spa": "Belgium",
+    "suzuka": "Japan",
+}
 
 
 class FastF1Client:
-    """Client for FastF1 data source.
+    """Thin wrapper around FastF1 with graceful optional import."""
 
-    FastF1 provides access to F1 lap timing, car telemetry,
-    position data, tyre information, and weather data.
-
-    Attributes:
-        connected: Whether client is connected to data source.
-    """
-
-    def __init__(self, cache_dir: Optional[str] = None):
-        """Initialize FastF1 client.
-
-        Args:
-            cache_dir: Optional directory for caching data.
-        """
-        self._cache_dir = cache_dir
+    def __init__(self, cache_dir: str | Path | None = None):
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else None
         self._connected = False
 
     @property
     def connected(self) -> bool:
-        """Check if client is connected."""
+        """Expose connection state."""
         return self._connected
 
     def connect(self) -> None:
-        """Establish connection to FastF1."""
-        # FastF1 doesn't require explicit connection, but we track state
+        """Enable optional FastF1 access and cache directory if provided."""
+        fastf1 = self._require_fastf1()
+        if self._cache_dir is not None:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            fastf1.Cache.enable_cache(str(self._cache_dir))
         self._connected = True
 
     def disconnect(self) -> None:
-        """Disconnect from FastF1."""
+        """Mark client disconnected."""
         self._connected = False
 
-    def fetch_lap_data(
-        self,
-        circuit_id: str,
-        session_type: str,
-        year: int,
-    ) -> "pd.DataFrame":
-        """Fetch lap timing data for a session.
+    def is_connected(self) -> bool:
+        """Return connection state."""
+        return self._connected
 
-        Args:
-            circuit_id: Circuit identifier (e.g., 'monza', 'monaco').
-            session_type: Session type ('fp1', 'fp2', 'fp3', 'quali', 'race').
-            year: Season year.
-
-        Returns:
-            DataFrame with lap data.
-
-        Raises:
-            ConnectionError: If not connected.
-            FetchError: If data fetch fails.
-        """
-        if not self._connected:
-            raise ConnectionError("Client not connected. Call connect() first.")
-
-        # Stub: Return empty DataFrame - real implementation will fetch from FastF1
-        import pandas as pd
-
-        return pd.DataFrame()
+    def fetch_lap_data(self, circuit_id: str, session_type: str, year: int) -> pd.DataFrame:
+        """Fetch lap-level timing data via FastF1."""
+        session = self._load_session(year, circuit_id, session_type)
+        frame = session.laps.copy()
+        if frame.empty:
+            return frame
+        frame.columns = [self._snake_case(str(column)) for column in frame.columns]
+        frame["source"] = "fastf1"
+        frame["dataset_name"] = "laps"
+        frame["track_id"] = circuit_id
+        frame["season"] = year
+        return frame.reset_index(drop=True)
 
     def fetch_telemetry(
         self,
         driver_id: str,
         session_id: str,
-        laps: Optional[List[int]] = None,
-    ) -> "pd.DataFrame":
-        """Fetch telemetry data for specific driver and session.
+        laps: list[int] | None = None,
+    ) -> pd.DataFrame:
+        """Fetch concatenated car telemetry for selected laps."""
+        year, circuit_id, session_type = self._parse_session_id(session_id)
+        session = self._load_session(year, circuit_id, session_type)
+        selected_laps = session.laps.pick_drivers(driver_id)
+        if laps:
+            selected_laps = selected_laps[selected_laps["LapNumber"].isin(laps)]
+        if selected_laps.empty:
+            return pd.DataFrame()
 
-        Args:
-            driver_id: Driver identifier.
-            session_id: Session identifier.
-            laps: Optional list of lap numbers to fetch.
+        frames = []
+        for _, lap in selected_laps.iterlaps():
+            telemetry = lap.get_car_data().add_distance()
+            telemetry["lap_number"] = int(lap["LapNumber"])
+            telemetry["driver_id"] = driver_id
+            frames.append(telemetry)
+        result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        if result.empty:
+            return result
+        result.columns = [self._snake_case(str(column)) for column in result.columns]
+        result["source"] = "fastf1"
+        result["dataset_name"] = "telemetry"
+        return result
 
-        Returns:
-            DataFrame with telemetry data.
-        """
+    def fetch_weather(self, session_id: str) -> pd.DataFrame:
+        """Fetch session weather samples via FastF1."""
+        year, circuit_id, session_type = self._parse_session_id(session_id)
+        session = self._load_session(year, circuit_id, session_type)
+        frame = session.weather_data.copy()
+        if frame.empty:
+            return frame
+        frame.columns = [self._snake_case(str(column)) for column in frame.columns]
+        frame["source"] = "fastf1"
+        frame["dataset_name"] = "weather"
+        return frame.reset_index(drop=True)
+
+    def _load_session(self, year: int, circuit_id: str, session_type: str) -> Any:
         if not self._connected:
             raise ConnectionError("Client not connected. Call connect() first.")
+        fastf1 = self._require_fastf1()
+        event_name = FASTF1_TRACK_MAP.get(circuit_id, circuit_id)
+        session_code = FASTF1_SESSION_MAP.get(session_type.lower(), session_type)
+        try:
+            session = fastf1.get_session(year, event_name, session_code)
+            session.load()
+            return session
+        except Exception as exc:  # pragma: no cover - dependent on external library/runtime
+            raise FetchError(
+                f"FastF1 failed for year={year} track={circuit_id} session={session_type}: {exc}"
+            ) from exc
 
-        import pandas as pd
+    def _parse_session_id(self, session_id: str) -> tuple[int, str, str]:
+        parts = session_id.split("_")
+        if len(parts) >= 3 and parts[0].isdigit():
+            return int(parts[0]), parts[1], "_".join(parts[2:])
+        raise FetchError(
+            "FastF1 session_id must use format '<year>_<track_id>_<session_type>', "
+            f"got {session_id!r}"
+        )
 
-        return pd.DataFrame()
+    def _require_fastf1(self) -> Any:
+        try:
+            import fastf1
+        except ImportError as exc:  # pragma: no cover - depends on optional dependency
+            raise FetchError(
+                "FastF1 is not installed. Install optional dependency group 'data' to enable it."
+            ) from exc
+        return fastf1
 
-    def fetch_weather(self, session_id: str) -> "pd.DataFrame":
-        """Fetch weather data for a session.
+    def _snake_case(self, value: str) -> str:
+        chars = []
+        for char in value:
+            if char.isupper() and chars:
+                chars.append("_")
+            chars.append(char.lower() if char.isalnum() else "_")
+        return "".join(chars).replace("__", "_").strip("_")
 
-        Args:
-            session_id: Session identifier.
-
-        Returns:
-            DataFrame with weather data.
-        """
-        if not self._connected:
-            raise ConnectionError("Client not connected. Call connect() first.")
-
-        import pandas as pd
-
-        return pd.DataFrame()

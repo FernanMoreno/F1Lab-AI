@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from reglabsim.track.segments import TrackSegment
 
@@ -21,6 +22,10 @@ class TrackModel:
     avg_speed_kph: float
     fidelity_level: int
     segments: list[TrackSegment] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    validation_status: str = "draft"
+    fidelity_notes: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def get_segment_at_distance(self, distance_m: float) -> TrackSegment:
         """Return the segment containing a distance along the lap."""
@@ -53,4 +58,3 @@ class TrackModel:
             if segment.primary_recharge_zone:
                 return segment
         return self.segments[0]
-

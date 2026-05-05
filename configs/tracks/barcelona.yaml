@@ -7,6 +7,18 @@ laps: 66
 race_distance_m: 308424
 avg_speed_kph: 205
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - tum_racetrack_database_seed
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - Balanced reference circuit for architecture comparison.
+metadata:
+  track_family: balanced_reference
+  local_risk_focus:
+    - barcelona_t1
+    - barcelona_final_corner
 segments:
   - id: barcelona_t1
     name: Turn 1

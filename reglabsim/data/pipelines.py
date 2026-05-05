@@ -1,128 +1,125 @@
-"""Data ingestion pipelines.
-
-Provides ETL pipelines for transforming raw F1 data into
-analytical datasets suitable for simulation and validation.
-"""
+"""Data ingestion pipelines for public F1 sources."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any
 
-if TYPE_CHECKING:
-    import pandas as pd
+import pandas as pd
+
+from reglabsim.data.base import PersistedDataset, SessionQuery
+from reglabsim.data.storage import LocalDataLake
+
+
+class PipelineStep:
+    """Base class for DataFrame transformation steps."""
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Transform one DataFrame."""
+        return data
+
+
+class NormalizeColumnNames(PipelineStep):
+    """Normalize column names to lowercase underscores."""
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        return data.rename(columns=lambda value: str(value).strip().lower().replace(" ", "_"))
+
+
+class AddQueryMetadata(PipelineStep):
+    """Attach session query metadata to every row."""
+
+    def __init__(self, query: SessionQuery):
+        self._query = query
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        if data.empty:
+            return data.copy()
+        result = data.copy()
+        result["query_year"] = self._query.year
+        result["query_track_id"] = self._query.track_id
+        result["query_session_type"] = self._query.session_type
+        if self._query.session_key is not None:
+            result["query_session_key"] = self._query.session_key
+        if self._query.meeting_key is not None:
+            result["query_meeting_key"] = self._query.meeting_key
+        return result
 
 
 class DataPipeline:
-    """ETL pipeline for F1 data.
-
-    Transforms raw data from various sources into clean,
-    normalized datasets for simulation and analysis.
-    """
+    """Composable ETL pipeline for tabular F1 datasets."""
 
     def __init__(self, name: str):
-        """Initialize pipeline.
-
-        Args:
-            name: Pipeline identifier.
-        """
         self._name = name
-        self._steps: List[PipelineStep] = []
+        self._steps: list[PipelineStep] = []
 
     @property
     def name(self) -> str:
-        """Get pipeline name."""
+        """Return pipeline name."""
         return self._name
 
     def add_step(self, step: PipelineStep) -> None:
-        """Add a transformation step.
-
-        Args:
-            step: Pipeline step to add.
-        """
+        """Append one transform step."""
         self._steps.append(step)
 
-    def run(self, input_data: "pd.DataFrame") -> "pd.DataFrame":
-        """Execute pipeline.
-
-        Args:
-            input_data: Input DataFrame.
-
-        Returns:
-            Transformed DataFrame.
-        """
+    def run(self, input_data: pd.DataFrame) -> pd.DataFrame:
+        """Execute the full pipeline sequentially."""
         data = input_data
         for step in self._steps:
             data = step.transform(data)
         return data
 
 
-class PipelineStep:
-    """Base class for pipeline transformation steps."""
+class PublicSessionIngestion:
+    """Persist a normalized session bundle into the local data lake."""
 
-    def transform(self, data: "pd.DataFrame") -> "pd.DataFrame":
-        """Transform data.
+    def __init__(self, lake: LocalDataLake):
+        self._lake = lake
 
-        Args:
-            data: Input DataFrame.
-
-        Returns:
-            Transformed DataFrame.
-        """
-        return data
-
-
-class NormalizeColumnNames(PipelineStep):
-    """Normalize column names to lowercase with underscores."""
-
-    def transform(self, data: "pd.DataFrame") -> "pd.DataFrame":
-        """Transform column names."""
-        import pandas as pd
-
-        return data.rename(columns=lambda x: x.lower().replace(" ", "_"))
-
-
-class AddComputedColumns(PipelineStep):
-    """Add computed columns to DataFrame."""
-
-    def __init__(self, computations: Dict[str, Any]):
-        """Initialize with computation definitions.
-
-        Args:
-            computations: Dict mapping column names to computation expressions.
-        """
-        self._computations = computations
-
-    def transform(self, data: "pd.DataFrame") -> "pd.DataFrame":
-        """Add computed columns."""
-        result = data.copy()
-        for col_name, expr in self._computations.items():
-            result[col_name] = result.eval(expr)
-        return result
-
-
-# Pipeline configurations
-PIPELINES: Dict[str, DataPipeline] = {}
-
-
-def register_pipeline(name: str, pipeline: DataPipeline) -> None:
-    """Register a named pipeline.
-
-    Args:
-        name: Pipeline identifier.
-        pipeline: Pipeline instance.
-    """
-    PIPELINES[name] = pipeline
+    def persist_bundle(
+        self,
+        *,
+        source: str,
+        query: SessionQuery,
+        bundle: dict[str, pd.DataFrame],
+        raw_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, PersistedDataset]:
+        """Persist raw and silver copies for each dataset in the bundle."""
+        persisted: dict[str, PersistedDataset] = {}
+        for dataset_name, frame in bundle.items():
+            pipeline = standard_pipeline(query=query, dataset_name=dataset_name)
+            normalized = pipeline.run(frame)
+            partition = query.partition_key()
+            persisted[f"raw::{dataset_name}"] = self._lake.persist_frame(
+                frame.reset_index(drop=True),
+                layer="raw",
+                source=source,
+                dataset_name=dataset_name,
+                partition=partition,
+                metadata={
+                    "query": query.to_dict(),
+                    "ingestion_stage": "raw",
+                    **(raw_metadata or {}),
+                },
+            )
+            persisted[f"silver::{dataset_name}"] = self._lake.persist_frame(
+                normalized.reset_index(drop=True),
+                layer="silver",
+                source=source,
+                dataset_name=dataset_name,
+                partition=partition,
+                metadata={
+                    "query": query.to_dict(),
+                    "ingestion_stage": "silver",
+                    "pipeline": pipeline.name,
+                    **(raw_metadata or {}),
+                },
+            )
+        return persisted
 
 
-def get_pipeline(name: str) -> DataPipeline:
-    """Get a registered pipeline.
-
-    Args:
-        name: Pipeline identifier.
-
-    Returns:
-        Pipeline instance.
-    """
-    if name not in PIPELINES:
-        raise KeyError(f"Pipeline '{name}' not found")
-    return PIPELINES[name]
+def standard_pipeline(*, query: SessionQuery, dataset_name: str) -> DataPipeline:
+    """Build the default normalization pipeline for public session data."""
+    pipeline = DataPipeline(name=f"{dataset_name}_standard_pipeline")
+    pipeline.add_step(NormalizeColumnNames())
+    pipeline.add_step(AddQueryMetadata(query))
+    return pipeline

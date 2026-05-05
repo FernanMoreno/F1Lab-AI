@@ -311,6 +311,19 @@ make clean          # Limpiar artefactos
 
 Verifica siempre el `Makefile` antes de asumir que un comando existe.
 
+### CLI operativa actual
+
+```bash
+python -m reglabsim.cli run-multiagent-race configs/campaigns/suzuka_mini_multiagent.yaml
+python -m reglabsim.cli run-redteam-campaign configs/campaigns/baku_redteam.yaml
+python -m reglabsim.cli describe-track suzuka
+python -m reglabsim.cli show-condition-profile windy_baku
+python -m reglabsim.cli ingest-session-data 2024 suzuka race --drivers 1
+python -m reglabsim.cli ingest-weekend-results 2024 1
+```
+
+Los comandos de ingestión guardan datasets reproducibles en `data/raw/` y `data/silver/` con manifiestos JSON y Parquet por partición.
+
 ---
 
 ## Tests

@@ -7,6 +7,17 @@ laps: 62
 race_distance_m: 306143
 avg_speed_kph: 175
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - Cooling and wall-proximity stress focus.
+metadata:
+  track_family: cooling_limited_street
+  local_risk_focus:
+    - singapore_t1
+    - singapore_final_sector
 segments:
   - id: singapore_t1
     name: Turn 1 Complex

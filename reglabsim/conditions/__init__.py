@@ -1,6 +1,7 @@
 """RegLabsim conditions module."""
 
 from reglabsim.conditions.forecast import default_forecast
+from reglabsim.conditions.repository import ConditionProfileRepository
 from reglabsim.conditions.scenarios import (
     ConditionsEvolutionModel,
     ConditionsScenario,
@@ -12,6 +13,7 @@ from reglabsim.conditions.scenarios import (
 from reglabsim.conditions.weather import WeatherCondition
 
 __all__ = [
+    "ConditionProfileRepository",
     "ConditionsEvolutionModel",
     "ConditionsScenario",
     "ForecastState",

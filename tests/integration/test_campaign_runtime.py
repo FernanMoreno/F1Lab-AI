@@ -32,6 +32,18 @@ def test_redteam_campaign_report_contains_ranked_failures(tmp_path: Path) -> Non
     assert sorted(report["summary"]["tracks"]) == ["baku", "monza"]
 
 
+def test_campaign_uses_condition_profile_and_track_provenance(tmp_path: Path) -> None:
+    facade = create_facade()
+    config_path = _campaign_config(tmp_path, "suzuka_mini_multiagent.yaml")
+
+    result = facade.run_multiagent_race(config_path)
+
+    assert result["conditions"]["name"] == "dry_hot"
+    assert result["conditions"]["metadata"]["validation_status"] == "draft_profile"
+    assert result["track_provenance"]["validation_status"] == "seeded_manual_review"
+    assert "manual_curation" in result["track_provenance"]["sources"]
+
+
 def test_facade_lists_extended_track_pack() -> None:
     facade = create_facade()
 

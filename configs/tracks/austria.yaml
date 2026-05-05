@@ -7,6 +7,17 @@ laps: 71
 race_distance_m: 306452
 avg_speed_kph: 235
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - Track-limit and kerb exploitation focus.
+metadata:
+  track_family: short_power_track
+  local_risk_focus:
+    - austria_t4
+    - austria_t10_exit
 segments:
   - id: austria_t1
     name: Turn 1

@@ -10,6 +10,8 @@ import yaml
 
 from reglabsim.campaigns.runner import CampaignRunner
 from reglabsim.campaigns.spec import CampaignSpec
+from reglabsim.conditions.repository import ConditionProfileRepository
+from reglabsim.data import FastF1Client, JolpicaClient, OpenF1Client, SessionQuery, UnifiedDataSource
 from reglabsim.failures.classifier import FailureClassifier
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.regulation.base import Regulation
@@ -34,12 +36,14 @@ class SimulationFacadeImpl:
         )
         self._data_dir = Path(data_dir) if data_dir else Path("outputs")
         self._track_repo = TrackRepository(self._config_dir / "tracks")
+        self._conditions_repo = ConditionProfileRepository(self._config_dir / "conditions")
         self._regulation_registry: dict[str, Regulation] = {}
         self._regulation_payloads: dict[str, dict[str, Any]] = {}
         self._car_family_registry: dict[str, CarFamily] = {}
         self._car_family_payloads: dict[str, dict[str, Any]] = {}
         self._replay = ReplayEngine()
         self._failure_classifier = FailureClassifier()
+        self._unified_data_source: UnifiedDataSource | None = None
 
     # ------------------------------------------------------------------
     # Registry loading
@@ -105,6 +109,25 @@ class SimulationFacadeImpl:
             track_repository=self._track_repo,
         )
 
+    def _data_source(self) -> UnifiedDataSource:
+        if self._unified_data_source is None:
+            unified = UnifiedDataSource(primary="openf1")
+            for name, source in (
+                ("openf1", OpenF1Client()),
+                ("jolpica", JolpicaClient()),
+                ("fastf1", FastF1Client(cache_dir=self._data_dir / "fastf1_cache")),
+            ):
+                try:
+                    source.connect()
+                except Exception:
+                    continue
+                unified.add_source(name, source)
+            if not unified.available_sources():
+                raise RuntimeError("No public data sources could be initialized")
+            unified.connect()
+            self._unified_data_source = unified
+        return self._unified_data_source
+
     # ------------------------------------------------------------------
     # Public registry API
     # ------------------------------------------------------------------
@@ -131,6 +154,68 @@ class SimulationFacadeImpl:
 
     def list_circuits(self) -> list[str]:
         return self._track_repo.list_ids()
+
+    def describe_track(self, track_id: str) -> dict[str, Any]:
+        """Return full track metadata and risk/provenance summary."""
+        track = self._track_repo.get(track_id)
+        return {
+            "track_id": track.track_id,
+            "name": track.name,
+            "country": track.country,
+            "length_m": track.length_m,
+            "turns": track.turns,
+            "fidelity_level": track.fidelity_level,
+            "sources": track.sources,
+            "validation_status": track.validation_status,
+            "fidelity_notes": track.fidelity_notes,
+            "metadata": track.metadata,
+            "segments": [segment.segment_id for segment in track.segments],
+        }
+
+    def list_condition_profiles(self) -> list[str]:
+        """List available condition profile presets."""
+        return self._conditions_repo.list_ids()
+
+    def load_condition_profile(self, profile_id: str) -> dict[str, Any]:
+        """Load one condition profile."""
+        scenario = self._conditions_repo.get(profile_id)
+        return {
+            "name": scenario.name,
+            "weather": vars(scenario.weather),
+            "track": vars(scenario.track),
+            "forecast": vars(scenario.forecast),
+            "metadata": scenario.metadata,
+        }
+
+    def ingest_public_session_data(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        driver_numbers: list[int] | None = None,
+        data_root: str = "data",
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch and persist one OpenF1 session bundle."""
+        query = SessionQuery(
+            year=year,
+            track_id=track_id,
+            session_type=session_type,
+            driver_numbers=driver_numbers or [],
+        )
+        persisted = self._data_source().ingest_openf1_session(query, data_root=data_root)
+        return {key: dataset.to_dict() for key, dataset in persisted.items()}
+
+    def ingest_public_weekend_results(
+        self,
+        *,
+        season: int,
+        round_num: int,
+        data_root: str = "data",
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch and persist Jolpica weekend results/qualifying."""
+        persisted = self._data_source().ingest_jolpica_weekend(season, round_num, data_root=data_root)
+        return {key: dataset.to_dict() for key, dataset in persisted.items()}
 
     # ------------------------------------------------------------------
     # Legacy experiment compatibility
@@ -209,8 +294,9 @@ class SimulationFacadeImpl:
         }
 
     def run_race_experiment(self, config_path: str | Path, seed: int | None = None) -> dict[str, Any]:
-        raw = self._load_yaml(config_path)
-        spec = CampaignSpec.from_dict(raw | {"seed": seed if seed is not None else raw.get("seed", 42)})
+        spec = CampaignSpec.from_yaml(config_path)
+        if seed is not None:
+            spec.seed = seed
         return self._campaign_runner().run_race(spec)
 
     # ------------------------------------------------------------------
@@ -223,19 +309,17 @@ class SimulationFacadeImpl:
         mode: str | None = None,
         seed: int | None = None,
     ) -> dict[str, Any]:
-        raw = self._load_yaml(config_path)
+        spec = CampaignSpec.from_yaml(config_path)
         if mode is not None:
-            raw["mode"] = mode
+            spec.mode = mode
         if seed is not None:
-            raw["seed"] = seed
-        spec = CampaignSpec.from_dict(raw)
+            spec.seed = seed
         return self._campaign_runner().run_race(spec)
 
     def run_redteam_campaign(self, config_path: str | Path, budget: int | None = None) -> dict[str, Any]:
-        raw = self._load_yaml(config_path)
+        spec = CampaignSpec.from_yaml(config_path)
         if budget is not None:
-            raw["repetitions"] = budget
-        spec = CampaignSpec.from_dict(raw)
+            spec.repetitions = budget
         return self._campaign_runner().run_campaign(spec).to_dict()
 
     def replay_race(
@@ -274,11 +358,10 @@ class SimulationFacadeImpl:
         n_repetitions: int = 3,
         seed: int | None = None,
     ) -> dict[str, Any]:
-        raw = self._load_yaml(experiment_config)
-        raw["repetitions"] = max(1, min(n_repetitions, 5))
+        spec = CampaignSpec.from_yaml(experiment_config)
+        spec.repetitions = max(1, min(n_repetitions, 5))
         if seed is not None:
-            raw["seed"] = seed
-        spec = CampaignSpec.from_dict(raw)
+            spec.seed = seed
 
         metrics_a = []
         metrics_b = []

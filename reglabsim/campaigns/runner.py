@@ -212,10 +212,18 @@ class CampaignRunner:
         metrics = self._compute_metrics(event_log, cars_sorted)
         run_output = {
             "manifest": manifest.to_dict(),
+            "track_provenance": {
+                "track_id": track.track_id,
+                "sources": track.sources,
+                "validation_status": track.validation_status,
+                "fidelity_notes": track.fidelity_notes,
+                "metadata": track.metadata,
+            },
             "conditions": {
                 "name": spec.conditions.name,
                 "weather": vars(weather),
                 "track_state": vars(track_state),
+                "metadata": spec.conditions.metadata,
             },
             "enforcement": enforcement,
             "observation_log": observation_log,

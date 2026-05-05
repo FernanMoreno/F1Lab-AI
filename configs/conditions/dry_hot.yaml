@@ -15,3 +15,8 @@ standing_water_level: 0.0
 dirt_offline_level: 0.24
 drying_rate: 0.03
 track_evolution_rate: 0.012
+metadata:
+  sources:
+    - synthetic_profile
+    - open_meteo_calibration_pending
+  validation_status: draft_profile

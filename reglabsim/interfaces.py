@@ -568,6 +568,59 @@ class SimulationFacade(Protocol):
         """
         ...
 
+    def run_multiagent_race(
+        self,
+        config_path: str | Path,
+        mode: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Run a multiagent race from campaign YAML."""
+        ...
+
+    def run_redteam_campaign(
+        self,
+        config_path: str | Path,
+        budget: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Run a multi-run red-team campaign."""
+        ...
+
+    def replay_race(
+        self,
+        run_output_or_path: Dict[str, Any] | str | Path,
+        mode: str = "replay_audit_exact",
+    ) -> Dict[str, Any]:
+        """Replay or re-simulate a saved run."""
+        ...
+
+    def classify_failures(self, run_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Classify run failures from logged events."""
+        ...
+
+    def propose_mitigations(self, run_output: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Generate counterfactual mitigation candidates and reruns."""
+        ...
+
+    def describe_track(self, track_id: str) -> Dict[str, Any]:
+        """Return track provenance and topology metadata."""
+        ...
+
+    def load_condition_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Load one named condition profile."""
+        ...
+
+    def ingest_public_session_data(
+        self,
+        *,
+        year: int,
+        track_id: str,
+        session_type: str,
+        driver_numbers: Optional[List[int]] = None,
+        data_root: str = "data",
+    ) -> Dict[str, Any]:
+        """Ingest one public session bundle into the local data lake."""
+        ...
+
 
 # =============================================================================
 # Type Aliases

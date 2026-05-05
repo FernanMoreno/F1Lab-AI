@@ -7,6 +7,18 @@ laps: 53
 race_distance_m: 306720
 avg_speed_kph: 250
 fidelity_level: 4
+sources:
+  - formula1_circuit_guide
+  - tum_racetrack_database_seed
+  - manual_curation
+validation_status: seeded_manual_review
+fidelity_notes:
+  - High-speed braking and kerb-abuse primitives included.
+metadata:
+  track_family: ultra_low_drag
+  local_risk_focus:
+    - monza_t1
+    - monza_ascari
 segments:
   - id: monza_start_finish
     name: Start Finish Straight

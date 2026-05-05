@@ -55,6 +55,10 @@ class TrackRepository:
             avg_speed_kph=float(data["avg_speed_kph"]),
             fidelity_level=int(data.get("fidelity_level", 1)),
             segments=segments,
+            sources=list(data.get("sources", ["manual_seed"])),
+            validation_status=data.get("validation_status", "draft"),
+            fidelity_notes=list(data.get("fidelity_notes", [])),
+            metadata=dict(data.get("metadata", {})),
         )
 
     def _parse_surface(self, data: dict[str, Any] | None, fallback: TrackSurface) -> TrackSurface:
@@ -158,4 +162,3 @@ class TrackRepository:
             risk=self._parse_risk(data.get("risk")),
             metadata=data.get("metadata", {}),
         )
-
