@@ -1,6 +1,6 @@
 [project]
 name = "f1lab-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "F1Lab-AI: Advanced F1 Regulation Stress-Testing Laboratory"
 readme = "README.md"
 requires-python = ">=3.11"

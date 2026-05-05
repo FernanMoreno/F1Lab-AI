@@ -1,44 +1,24 @@
-"""F1Lab-AI Simulation Facade.
-
-Provides unified access to all simulation capabilities through a single interface.
-Agents and dashboards must use this facade, not concrete simulators.
-
-Example:
-    >>> from reglabsim.facade import create_facade
-    >>> facade = create_facade()
-    >>> result = facade.run_battle_experiment("configs/experiments/baku_closing_speed.yaml")
-    >>> metrics = facade.compute_metrics(result)
-"""
+"""Unified simulation facade for experiments, races and campaigns."""
 
 from __future__ import annotations
 
-import random
+from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
-from reglabsim.interfaces import (
-    CircuitBase,
-    LapSimulatorBase,
-    MetricRegistry,
-    RaceSimulatorBase,
-    SimulationFacade,
-)
+from reglabsim.campaigns.runner import CampaignRunner
+from reglabsim.campaigns.spec import CampaignSpec
+from reglabsim.failures.classifier import FailureClassifier
+from reglabsim.logging.replay import ReplayEngine
 from reglabsim.regulation.base import Regulation
+from reglabsim.track.track_loader import TrackRepository
 from reglabsim.vehicle.car_family import CarFamily
-
-if TYPE_CHECKING:
-    import numpy as np
-
-    from reglabsim.circuits.base import CircuitModel
 
 
 class SimulationFacadeImpl:
-    """Implementation of SimulationFacade protocol.
-
-    Provides unified access to all simulation capabilities.
-    """
+    """Main facade for deterministic and multiagent simulation flows."""
 
     def __init__(
         self,
@@ -47,195 +27,114 @@ class SimulationFacadeImpl:
         car_families_path: Path | str | None = None,
         data_dir: Path | str | None = None,
     ):
-        """Initialize simulation facade.
-
-        Args:
-            config_dir: Base configuration directory.
-            regulation_dir: Regulations directory (defaults to config_dir/regulations).
-            car_families_path: Path to car_families.yaml.
-            data_dir: Data directory for experiment outputs.
-        """
         self._config_dir = Path(config_dir)
         self._regulation_dir = Path(regulation_dir) if regulation_dir else self._config_dir / "regulations"
-        self._car_families_path = Path(car_families_path) if car_families_path else self._config_dir / "car_families.yaml"
-        self._data_dir = Path(data_dir) if data_dir else Path("data")
+        self._car_families_path = (
+            Path(car_families_path) if car_families_path else self._config_dir / "car_families.yaml"
+        )
+        self._data_dir = Path(data_dir) if data_dir else Path("outputs")
+        self._track_repo = TrackRepository(self._config_dir / "tracks")
+        self._regulation_registry: dict[str, Regulation] = {}
+        self._regulation_payloads: dict[str, dict[str, Any]] = {}
+        self._car_family_registry: dict[str, CarFamily] = {}
+        self._car_family_payloads: dict[str, dict[str, Any]] = {}
+        self._replay = ReplayEngine()
+        self._failure_classifier = FailureClassifier()
 
-        # Lazy-loaded components
-        self._regulation_registry: Dict[str, Regulation] = {}
-        self._car_family_registry: Dict[str, CarFamily] = {}
-        self._circuit_registry: Dict[str, CircuitBase] = {}
-        self._metric_registry: Optional[MetricRegistry] = None
-        self._lap_simulator: Optional[LapSimulatorBase] = None
-        self._race_simulator: Optional[RaceSimulatorBase] = None
+    # ------------------------------------------------------------------
+    # Registry loading
+    # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------------
-    # Regulation Management
-    # ------------------------------------------------------------------------
+    def _ensure_regulations_loaded(self) -> None:
+        if self._regulation_registry:
+            return
+        if not self._regulation_dir.exists():
+            return
+        for reg_file in self._regulation_dir.glob("*.yaml"):
+            with open(reg_file, encoding="utf-8") as handle:
+                data = yaml.safe_load(handle)
+            reg_id = data.get("name", reg_file.stem)
+            self._regulation_payloads[reg_id] = data
+            self._regulation_registry[reg_id] = Regulation(
+                name=data.get("name", reg_id),
+                version=data.get("version", "0.0"),
+                status=data.get("status", "unknown"),
+                power_unit=data.get("power_unit", {}),
+                active_aero=data.get("active_aero", {}),
+                aero=data.get("aero", {}),
+                tyres=data.get("tyres", {}),
+                safety=data.get("safety", {}),
+                weights=data.get("weights", {}),
+                sessions=data.get("sessions", {}),
+                assumptions=data.get("assumptions", []),
+            )
 
-    def list_regulations(self) -> List[str]:
-        """List available regulation IDs."""
-        self._ensure_regulation_loaded()
+    def _ensure_car_families_loaded(self) -> None:
+        if self._car_family_registry:
+            return
+        if not self._car_families_path.exists():
+            return
+        with open(self._car_families_path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)
+        for family_id, family_data in data.get("car_families", {}).items():
+            self._car_family_payloads[family_id] = family_data
+            self._car_family_registry[family_id] = CarFamily(
+                family_id=family_id,
+                description=family_data.get("description", ""),
+                mass_kg=family_data.get("mass_kg", 780.0),
+                cda_straight_m2=family_data.get("cda_straight_m2", 0.9),
+                cda_corner_m2=family_data.get("cda_corner_m2", 1.2),
+                cla_straight_m2=family_data.get("cla_straight_m2", 2.2),
+                cla_corner_m2=family_data.get("cla_corner_m2", 3.8),
+                power_kw=family_data.get("power_kw", 740.0),
+                ers_efficiency=family_data.get("ers_efficiency", 0.75),
+                tyre_deg_factor=family_data.get("tyre_deg_factor", 1.0),
+                dirty_air_sensitivity=family_data.get("dirty_air_sensitivity", 0.15),
+                strength=family_data.get("strength", []),
+                weakness=family_data.get("weakness", []),
+            )
+
+    def _campaign_runner(self) -> CampaignRunner:
+        self._ensure_regulations_loaded()
+        self._ensure_car_families_loaded()
+        regulation_payloads = {key: deepcopy(value) for key, value in self._regulation_payloads.items()}
+        car_family_payloads = {key: deepcopy(value) for key, value in self._car_family_payloads.items()}
+        return CampaignRunner(
+            regulations=regulation_payloads,
+            car_families=car_family_payloads,
+            track_repository=self._track_repo,
+        )
+
+    # ------------------------------------------------------------------
+    # Public registry API
+    # ------------------------------------------------------------------
+
+    def list_regulations(self) -> list[str]:
+        self._ensure_regulations_loaded()
         return list(self._regulation_registry.keys())
 
     def load_regulation(self, regulation_id: str) -> Regulation:
-        """Load regulation configuration by ID."""
-        self._ensure_regulation_loaded()
+        self._ensure_regulations_loaded()
         if regulation_id not in self._regulation_registry:
             raise KeyError(f"Regulation '{regulation_id}' not found")
         return self._regulation_registry[regulation_id]
 
-    def _ensure_regulation_loaded(self) -> None:
-        """Load all regulations from disk if not already loaded."""
-        if self._regulation_registry:
-            return
-
-        if not self._regulation_dir.exists():
-            return
-
-        for reg_file in self._regulation_dir.glob("*.yaml"):
-            try:
-                with open(reg_file) as f:
-                    data = yaml.safe_load(f)
-                reg_id = data.get("name", reg_file.stem)
-                self._regulation_registry[reg_id] = self._load_regulation_from_dict(data)
-            except Exception:
-                continue
-
-    def _load_regulation_from_dict(self, data: Dict[str, Any]) -> Regulation:
-        """Create Regulation object from dictionary data."""
-        # Import here to avoid circular imports
-        from reglabsim.regulation.base import Regulation
-
-        return Regulation(
-            name=data.get("name", "unknown"),
-            version=data.get("version", "0.0"),
-            status=data.get("status", "unknown"),
-            power_unit=data.get("power_unit", {}),
-            active_aero=data.get("active_aero", {}),
-            aero=data.get("aero", {}),
-            tyres=data.get("tyres", {}),
-            safety=data.get("safety", {}),
-            weights=data.get("weights", {}),
-            sessions=data.get("sessions", {}),
-            assumptions=data.get("assumptions", []),
-        )
-
-    # ------------------------------------------------------------------------
-    # Car Family Management
-    # ------------------------------------------------------------------------
-
-    def list_car_families(self) -> List[str]:
-        """List available car family IDs."""
+    def list_car_families(self) -> list[str]:
         self._ensure_car_families_loaded()
         return list(self._car_family_registry.keys())
 
     def load_car_family(self, family_id: str) -> CarFamily:
-        """Load car family configuration by ID."""
         self._ensure_car_families_loaded()
         if family_id not in self._car_family_registry:
             raise KeyError(f"Car family '{family_id}' not found")
         return self._car_family_registry[family_id]
 
-    def _ensure_car_families_loaded(self) -> None:
-        """Load car families from disk if not already loaded."""
-        if self._car_family_registry:
-            return
+    def list_circuits(self) -> list[str]:
+        return self._track_repo.list_ids()
 
-        if not self._car_families_path.exists():
-            return
-
-        with open(self._car_families_path) as f:
-            data = yaml.safe_load(f)
-
-        families_data = data.get("car_families", {})
-        for family_id, family_data in families_data.items():
-            self._car_family_registry[family_id] = self._load_car_family_from_dict(
-                family_id, family_data
-            )
-
-    def _load_car_family_from_dict(self, family_id: str, data: Dict[str, Any]) -> CarFamily:
-        """Create CarFamily object from dictionary data."""
-        from reglabsim.vehicle.car_family import CarFamily
-
-        return CarFamily(
-            family_id=family_id,
-            description=data.get("description", ""),
-            mass_kg=data.get("mass_kg", 780.0),
-            cda_straight_m2=data.get("cda_straight_m2", 0.9),
-            cda_corner_m2=data.get("cda_corner_m2", 1.2),
-            cla_straight_m2=data.get("cla_straight_m2", 2.2),
-            cla_corner_m2=data.get("cla_corner_m2", 3.8),
-            power_kw=data.get("power_kw", 740.0),
-            ers_efficiency=data.get("ers_efficiency", 0.75),
-            tyre_deg_factor=data.get("tyre_deg_factor", 1.0),
-            dirty_air_sensitivity=data.get("dirty_air_sensitivity", 0.15),
-            strength=data.get("strength", []),
-            weakness=data.get("weakness", []),
-        )
-
-    # ------------------------------------------------------------------------
-    # Circuit Management
-    # ------------------------------------------------------------------------
-
-    def list_circuits(self) -> List[str]:
-        """List available circuit IDs."""
-        self._ensure_circuits_loaded()
-        return list(self._circuit_registry.keys())
-
-    def _ensure_circuits_loaded(self) -> None:
-        """Load built-in circuits if not already loaded."""
-        if self._circuit_registry:
-            return
-
-        # Built-in circuits
-        from reglabsim.circuits.base import CircuitModel
-
-        self._circuit_registry = {
-            "monza": CircuitModel(
-                circuit_id="monza",
-                name="Autodromo Nazionale Monza",
-                country="Italy",
-                length_m=5793.0,
-                corners=11,
-                drs_zones=1,
-                avg_speed_kph=250.0,
-                characteristics={"high_speed": True, "low_downforce": True},
-            ),
-            "monaco": CircuitModel(
-                circuit_id="monaco",
-                name="Circuit de Monaco",
-                country="Monaco",
-                length_m=3371.0,
-                corners=19,
-                drs_zones=1,
-                avg_speed_kph=160.0,
-                characteristics={"tight_corners": True, "street_circuit": True},
-            ),
-            "baku": CircuitModel(
-                circuit_id="baku",
-                name="Baku City Circuit",
-                country="Azerbaijan",
-                length_m=6003.0,
-                corners=20,
-                drs_zones=1,
-                avg_speed_kph=200.0,
-                characteristics={"straight_heavy": True, "street_circuit": True},
-            ),
-            "barcelona": CircuitModel(
-                circuit_id="barcelona",
-                name="Circuit de Barcelona-Catalunya",
-                country="Spain",
-                length_m=4677.0,
-                corners=16,
-                drs_zones=1,
-                avg_speed_kph=200.0,
-                characteristics={"balanced": True, "technical_corners": True},
-            ),
-        }
-
-    # ------------------------------------------------------------------------
-    # Experiment Execution
-    # ------------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Legacy experiment compatibility
+    # ------------------------------------------------------------------
 
     def run_lap_experiment(
         self,
@@ -243,276 +142,196 @@ class SimulationFacadeImpl:
         regulation_id: str,
         car_family_id: str,
         circuit_id: str,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Run a single lap experiment.
-
-        Args:
-            config_path: Path to experiment config YAML.
-            regulation_id: Regulation to use.
-            car_family_id: Car family to simulate.
-            circuit_id: Circuit identifier.
-            seed: Random seed for reproducibility.
-
-        Returns:
-            Dict with lap_time, sectors, energy, speed_trace.
-        """
-        experiment = self._load_experiment_config(config_path)
-        regulation = self.load_regulation(regulation_id)
-        car_family = self.load_car_family(car_family_id)
-
-        self._ensure_circuits_loaded()
-        if circuit_id not in self._circuit_registry:
-            raise KeyError(f"Circuit '{circuit_id}' not found")
-        circuit = self._circuit_registry[circuit_id]
-
-        rng = self._create_rng(seed)
-
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        spec = CampaignSpec.from_dict(
+            {
+                "campaign_name": "lap_experiment",
+                "regulation": regulation_id,
+                "track": circuit_id,
+                "num_cars": 1,
+                "laps": 1,
+                "mode": "rule_based",
+                "seed": seed or 42,
+            }
+        )
+        result = self._campaign_runner().run_race(spec, track_id=circuit_id)
+        final_car = result["state_snapshots"][-1]["cars"][0]
         return {
-            "experiment_name": experiment.get("experiment_name", "unknown"),
+            "experiment_name": "lap_experiment",
             "regulation_id": regulation_id,
             "car_family_id": car_family_id,
             "circuit_id": circuit_id,
-            "seed": seed,
-            "lap_time_s": 80.5 + rng.random() * 2,  # Stub: realistic values later
-            "sector_times": [25.0 + rng.random(), 28.0 + rng.random(), 27.0 + rng.random()],
-            "speed_trace": [250.0 + rng.random() * 50 for _ in range(100)],
-            "energy_used_mj": 1.5 + rng.random() * 0.5,
-            "energy_recovered_mj": 0.8 + rng.random() * 0.3,
-            "top_speed_kph": 320.0 + rng.random() * 20,
+            "seed": spec.seed,
+            "lap_time_s": final_car["last_lap_time_s"],
+            "sector_times": [final_car["last_lap_time_s"] / 3.0] * 3,
+            "speed_trace": [],
+            "energy_used_mj": (1.0 - final_car["ers_soc"]) * 6.0,
+            "energy_recovered_mj": max(0.0, final_car["ers_soc"] * 1.5),
+            "top_speed_kph": self._track_repo.get(circuit_id).avg_speed_kph + 35.0,
         }
 
-    def run_battle_experiment(
-        self,
-        config_path: str | Path,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Run a two-car battle experiment.
-
-        Args:
-            config_path: Path to experiment config YAML.
-            seed: Random seed for reproducibility.
-
-        Returns:
-            Dict with battle statistics, overtakes, closing speeds.
-        """
-        experiment = self._load_experiment_config(config_path)
-        rng = self._create_rng(seed)
-
-        # Stub implementation - realistic simulation later
-        n_overtakes = int(rng.integers(0, 5))
-        overtakes = []
-        for i in range(n_overtakes):
-            overtakes.append(
-                {
-                    "lap": int(rng.integers(1, experiment.get("simulation", {}).get("laps", 10))),
-                    "closing_speed_kph": 150.0 + rng.random() * 100,
-                    "energy_delta_mj": rng.random() * 2 - 1,
-                    "success": rng.random() > 0.3,
-                }
-            )
-
+    def run_battle_experiment(self, config_path: str | Path, seed: int | None = None) -> dict[str, Any]:
+        raw = self._load_yaml(config_path)
+        spec = CampaignSpec.from_dict(
+            {
+                "campaign_name": raw.get("experiment_name", "battle_experiment"),
+                "description": raw.get("description", ""),
+                "regulation": raw.get("regulation", "regulation_2026_refined"),
+                "track": raw.get("track", "baku"),
+                "num_cars": 2,
+                "laps": raw.get("simulation", {}).get("laps", 8),
+                "mode": "llm_event_driven",
+                "seed": seed if seed is not None else raw.get("simulation", {}).get("seed", 42),
+                "conditions": raw.get("conditions", {}),
+                "objectives": raw.get("metrics", []),
+            }
+        )
+        run = self._campaign_runner().run_race(spec)
+        overtakes = [
+            event["details"] | {"lap": event["lap"], "type": event["event_type"]}
+            for event in run["event_log"]
+            if event["event_type"] in {"overtake", "incident"}
+        ]
         return {
-            "experiment_name": experiment.get("experiment_name", "unknown"),
-            "seed": seed,
-            "num_overtakes": n_overtakes,
+            "experiment_name": spec.campaign_name,
+            "seed": spec.seed,
+            "num_overtakes": len([event for event in run["event_log"] if event["event_type"] == "overtake"]),
             "overtakes": overtakes,
-            "max_closing_speed_kph": 200.0 + rng.random() * 150,
-            "dangerous_closing_speed_index": rng.random() * 0.1,
-            "train_formation_index": rng.random() * 0.3,
-            "attacker_win_rate": rng.random(),
+            "max_closing_speed_kph": max((event.get("closing_speed_kph", 0.0) for event in overtakes), default=0.0),
+            "dangerous_closing_speed_index": sum(
+                1 for event in overtakes if event.get("closing_speed_kph", 0.0) > 55.0
+            )
+            / max(len(overtakes), 1),
+            "train_formation_index": max(0.0, 1.0 - len(overtakes) / max(spec.laps, 1)),
+            "attacker_win_rate": 1.0 if run["result"]["winner"] == "car_01" else 0.0,
+            "_run_output": run,
         }
 
-    def run_race_experiment(
+    def run_race_experiment(self, config_path: str | Path, seed: int | None = None) -> dict[str, Any]:
+        raw = self._load_yaml(config_path)
+        spec = CampaignSpec.from_dict(raw | {"seed": seed if seed is not None else raw.get("seed", 42)})
+        return self._campaign_runner().run_race(spec)
+
+    # ------------------------------------------------------------------
+    # New multiagent API
+    # ------------------------------------------------------------------
+
+    def run_multiagent_race(
         self,
         config_path: str | Path,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Run a full race experiment.
+        mode: str | None = None,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        raw = self._load_yaml(config_path)
+        if mode is not None:
+            raw["mode"] = mode
+        if seed is not None:
+            raw["seed"] = seed
+        spec = CampaignSpec.from_dict(raw)
+        return self._campaign_runner().run_race(spec)
 
-        Args:
-            config_path: Path to experiment config YAML.
-            seed: Random seed for reproducibility.
+    def run_redteam_campaign(self, config_path: str | Path, budget: int | None = None) -> dict[str, Any]:
+        raw = self._load_yaml(config_path)
+        if budget is not None:
+            raw["repetitions"] = budget
+        spec = CampaignSpec.from_dict(raw)
+        return self._campaign_runner().run_campaign(spec).to_dict()
 
-        Returns:
-            Dict with race results, positions, strategy analysis.
-        """
-        experiment = self._load_experiment_config(config_path)
-        race_config = experiment.get("race_config", {})
-        n_cars = race_config.get("num_cars", 20)
-        n_laps = experiment.get("simulation", {}).get("laps", 53)
-        rng = self._create_rng(seed)
-
-        # Stub: Generate race results
-        positions = list(range(1, n_cars + 1))
-        rng.shuffle(positions)
-
-        lap_times = {}
-        for pos in positions:
-            lap_times[pos] = [
-                80.0 + rng.random() * 2 + (pos - 1) * 0.1
-                for _ in range(n_laps)
-            ]
-
-        return {
-            "experiment_name": experiment.get("experiment_name", "unknown"),
-            "seed": seed,
-            "num_cars": n_cars,
-            "laps": n_laps,
-            "final_positions": positions,
-            "lap_times": lap_times,
-            "total_overtakes": int(rng.integers(20, 80)),
-            "pit_stops": rng.integers(0, 3),
-        }
-
-    def _load_experiment_config(self, config_path: str | Path) -> Dict[str, Any]:
-        """Load experiment configuration from YAML."""
-        path = Path(config_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Experiment config not found: {config_path}")
-
-        with open(path) as f:
-            return yaml.safe_load(f)
-
-    def _create_rng(self, seed: Optional[int]) -> "np.random.Generator":
-        """Create a numpy random number generator."""
-        import numpy as np
-
-        return np.random.default_rng(seed)
-
-    # ------------------------------------------------------------------------
-    # Metrics
-    # ------------------------------------------------------------------------
-
-    def compute_metrics(
+    def replay_race(
         self,
-        simulation_output: Dict[str, Any],
-        metric_names: Optional[List[str]] = None,
-    ) -> Dict[str, float]:
-        """Compute metrics from simulation output.
+        run_output_or_path: dict[str, Any] | str | Path,
+        mode: str = "replay_audit_exact",
+    ) -> dict[str, Any]:
+        run_output = (
+            self._replay.load_run(run_output_or_path)
+            if isinstance(run_output_or_path, (str, Path))
+            else run_output_or_path
+        )
+        if mode == "replay_audit_exact":
+            return self._replay.replay_audit_exact(run_output)
 
-        Args:
-            simulation_output: Output from simulation.
-            metric_names: Optional list of specific metrics to compute.
+        replay_actions = self._replay.extract_policy_replay_actions(run_output)
+        spec = CampaignSpec.from_dict(run_output["spec"] | {"mode": "policy_replay"})
+        rerun = self._campaign_runner().run_race(
+            spec,
+            track_id=run_output["manifest"]["track_id"],
+            replay_actions=replay_actions,
+        )
+        return {"mode": "replay_resimulate", "original": run_output["manifest"], "rerun": rerun["manifest"], "result": rerun["result"]}
 
-        Returns:
-            Dict mapping metric names to values.
-        """
-        self._ensure_metric_registry()
+    def classify_failures(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
+        return [failure.to_dict() for failure in self._failure_classifier.classify(run_output)]
 
-        if metric_names is None:
-            return self._metric_registry.calculate_all(simulation_output)
-
-        result = {}
-        for name in metric_names:
-            try:
-                metric = self._metric_registry.get(name)
-                result[name] = metric.calculate(simulation_output)
-            except KeyError:
-                continue
-        return result
-
-    def _ensure_metric_registry(self) -> None:
-        """Initialize metric registry if needed."""
-        if self._metric_registry is not None:
-            return
-
-        from reglabsim.metrics.registry import MetricRegistryImpl
-
-        self._metric_registry = MetricRegistryImpl()
-
-    # ------------------------------------------------------------------------
-    # Regulation Comparison
-    # ------------------------------------------------------------------------
+    def propose_mitigations(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._campaign_runner().propose_mitigations(run_output)
 
     def compare_regulations(
         self,
         regulation_a: str,
         regulation_b: str,
         experiment_config: str | Path,
-        n_repetitions: int = 100,
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Compare two regulations using same experiment.
+        n_repetitions: int = 3,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        raw = self._load_yaml(experiment_config)
+        raw["repetitions"] = max(1, min(n_repetitions, 5))
+        if seed is not None:
+            raw["seed"] = seed
+        spec = CampaignSpec.from_dict(raw)
 
-        Args:
-            regulation_a: First regulation ID.
-            regulation_b: Second regulation ID.
-            experiment_config: Path to experiment config.
-            n_repetitions: Number of Monte Carlo repetitions.
-            seed: Random seed.
+        metrics_a = []
+        metrics_b = []
+        runner = self._campaign_runner()
+        for index in range(spec.repetitions):
+            spec.seed = (seed or spec.seed) + index
+            run_a = runner.run_race(CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_a}))
+            run_b = runner.run_race(CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_b}))
+            metrics_a.append(run_a["metrics"])
+            metrics_b.append(run_b["metrics"])
 
-        Returns:
-            Dict with comparison statistics, metric diffs.
-        """
-        rng = self._create_rng(seed)
-
-        # Stub: Run simulations for both regulations
-        results_a = []
-        results_b = []
-
-        for i in range(n_repetitions):
-            trial_seed = rng.integers(0, 2**31)
-
-            # Run battle experiment for regulation A
-            result_a = self.run_battle_experiment(experiment_config, seed=trial_seed)
-            results_a.append(result_a)
-
-            # Run battle experiment for regulation B
-            result_b = self.run_battle_experiment(experiment_config, seed=trial_seed)
-            results_b.append(result_b)
+        def aggregate(items: list[dict[str, Any]]) -> dict[str, float]:
+            return {
+                "avg_overtakes": sum(item["total_overtakes"] for item in items) / len(items),
+                "avg_incidents": sum(item["incident_count"] for item in items) / len(items),
+                "avg_closing_speed": sum(item["avg_closing_speed_kph"] for item in items) / len(items),
+            }
 
         return {
             "regulation_a": regulation_a,
             "regulation_b": regulation_b,
-            "n_repetitions": n_repetitions,
-            "seed": seed,
-            "regulation_a_metrics": {
-                "avg_overtakes": sum(r["num_overtakes"] for r in results_a) / n_repetitions,
-                "avg_closing_speed": sum(r["max_closing_speed_kph"] for r in results_a) / n_repetitions,
-                "avg_dangerous_index": sum(r["dangerous_closing_speed_index"] for r in results_a) / n_repetitions,
-            },
-            "regulation_b_metrics": {
-                "avg_overtakes": sum(r["num_overtakes"] for r in results_b) / n_repetitions,
-                "avg_closing_speed": sum(r["max_closing_speed_kph"] for r in results_b) / n_repetitions,
-                "avg_dangerous_index": sum(r["dangerous_closing_speed_index"] for r in results_b) / n_repetitions,
-            },
-            "winner": regulation_a if rng.random() > 0.5 else regulation_b,
+            "n_repetitions": spec.repetitions,
+            "regulation_a_metrics": aggregate(metrics_a),
+            "regulation_b_metrics": aggregate(metrics_b),
         }
 
+    def compute_metrics(self, simulation_output: dict[str, Any], metric_names: list[str] | None = None) -> dict[str, Any]:
+        metrics = simulation_output.get("metrics")
+        if metrics is None and "_run_output" in simulation_output:
+            metrics = simulation_output["_run_output"].get("metrics")
+        if metrics is None and "overtakes" in simulation_output:
+            overtakes = simulation_output.get("overtakes", [])
+            metrics = {
+                "total_overtakes": len(overtakes),
+                "avg_closing_speed_kph": sum(item.get("closing_speed_kph", 0.0) for item in overtakes)
+                / max(len(overtakes), 1),
+            }
+        if metrics is not None:
+            return metrics if metric_names is None else {name: metrics.get(name) for name in metric_names}
+        return {}
 
-# =============================================================================
-# Factory Function
-# =============================================================================
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _load_yaml(self, path: str | Path) -> dict[str, Any]:
+        with open(path, encoding="utf-8") as handle:
+            return yaml.safe_load(handle)
 
 
-def create_facade(
-    config_dir: str | Path = "configs",
-    **kwargs,
-) -> SimulationFacade:
-    """Create a simulation facade instance.
-
-    Args:
-        config_dir: Base configuration directory.
-        **kwargs: Additional arguments passed to SimulationFacadeImpl.
-
-    Returns:
-        SimulationFacade instance.
-
-    Example:
-        >>> facade = create_facade()
-        >>> facade.list_regulations()
-        ['regulation_2025', 'regulation_2026_initial', ...]
-    """
+def create_facade(config_dir: str | Path = "configs", **kwargs: Any) -> SimulationFacadeImpl:
+    """Create a simulation facade."""
     return SimulationFacadeImpl(config_dir=config_dir, **kwargs)
 
 
-# =============================================================================
-# Module Exports
-# =============================================================================
-
-__all__ = [
-    "SimulationFacade",
-    "SimulationFacadeImpl",
-    "create_facade",
-]
+__all__ = ["SimulationFacadeImpl", "create_facade"]

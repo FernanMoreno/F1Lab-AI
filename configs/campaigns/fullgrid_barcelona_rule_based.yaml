@@ -1,0 +1,33 @@
+campaign_name: fullgrid_barcelona_rule_based
+description: Deterministic full-grid baseline race without LLM intervention.
+regulation: regulation_2026_refined
+track: barcelona
+scale_preset: full-grid
+mode: rule_based
+seed: 101
+repetitions: 1
+conditions:
+  name: dry_hot
+  air_temperature_c: 27
+  track_temperature_c: 40
+  humidity_percent: 44
+  wind_speed_mps: 2.2
+  wind_direction_deg: 35
+  rain_intensity_mm_h: 0.0
+  visibility_m: 1000
+  grip_level: 0.98
+  rubber_level: 0.5
+  wetness_level: 0.0
+  standing_water_level: 0.0
+  dirt_offline_level: 0.18
+  drying_rate: 0.02
+  track_evolution_rate: 0.012
+forecast:
+  rain_expected_lap: null
+  confidence: 0.4
+  rain_intensity_expected: none
+enforcement:
+  steward_strictness: high
+objectives:
+  - dominant_architecture
+  - strategy_convergence

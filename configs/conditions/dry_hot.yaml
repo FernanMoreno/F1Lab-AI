@@ -1,0 +1,17 @@
+name: dry_hot
+air_temperature_c: 33
+track_temperature_c: 49
+humidity_percent: 34
+pressure_hpa: 1007
+wind_speed_mps: 2.1
+wind_direction_deg: 40
+rain_intensity_mm_h: 0.0
+cloud_cover_pct: 8
+visibility_m: 1000
+grip_level: 0.96
+rubber_level: 0.4
+wetness_level: 0.0
+standing_water_level: 0.0
+dirt_offline_level: 0.24
+drying_rate: 0.03
+track_evolution_rate: 0.012

@@ -1,0 +1,73 @@
+track_id: monaco
+name: Circuit de Monaco
+country: Monaco
+length_m: 3371
+turns: 19
+laps: 78
+race_distance_m: 263538
+avg_speed_kph: 160
+fidelity_level: 4
+segments:
+  - id: monaco_sainte_devote
+    name: Sainte Devote
+    type: braking_zone
+    start_m: 0
+    end_m: 220
+    width_m: 12
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 30
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: high
+      barrier_distance_m: 10
+  - id: monaco_hairpin
+    name: Grand Hotel Hairpin
+    type: hairpin
+    start_m: 1100
+    end_m: 1250
+    width_m: 9
+    overtaking_viability: low
+    risk:
+      unsafe_closing_speed_threshold_kph: 18
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: low
+      barrier_distance_m: 7
+  - id: monaco_tunnel
+    name: Tunnel
+    type: straight
+    start_m: 1800
+    end_m: 2200
+    width_m: 12
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 45
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 16
+  - id: monaco_chicane
+    name: Nouvelle Chicane
+    type: chicane
+    start_m: 2200
+    end_m: 2400
+    width_m: 12
+    overtaking_viability: medium
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.98
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.04
+    risk:
+      unsafe_closing_speed_threshold_kph: 28
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: high
+      barrier_distance_m: 11

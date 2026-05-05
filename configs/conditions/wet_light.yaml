@@ -1,0 +1,17 @@
+name: wet_light
+air_temperature_c: 19
+track_temperature_c: 22
+humidity_percent: 88
+pressure_hpa: 1003
+wind_speed_mps: 3.5
+wind_direction_deg: 70
+rain_intensity_mm_h: 1.4
+cloud_cover_pct: 84
+visibility_m: 650
+grip_level: 0.8
+rubber_level: 0.28
+wetness_level: 0.42
+standing_water_level: 0.12
+dirt_offline_level: 0.3
+drying_rate: 0.005
+track_evolution_rate: 0.004

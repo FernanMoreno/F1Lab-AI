@@ -1,0 +1,82 @@
+track_id: austria
+name: Red Bull Ring
+country: Austria
+length_m: 4318
+turns: 10
+laps: 71
+race_distance_m: 306452
+avg_speed_kph: 235
+fidelity_level: 4
+segments:
+  - id: austria_t1
+    name: Turn 1
+    type: fast_corner
+    start_m: 0
+    end_m: 260
+    width_m: 14
+    overtaking_viability: medium
+    risk:
+      unsafe_closing_speed_threshold_kph: 35
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 24
+  - id: austria_t3_braking
+    name: Turn 3 Braking
+    type: braking_zone
+    start_m: 1200
+    end_m: 1480
+    width_m: 15
+    overtaking_viability: high
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 56
+      side_by_side_risk: high
+      evasive_action_margin: medium
+      energy_delta_sensitivity: critical
+      barrier_distance_m: 28
+  - id: austria_t4_exit
+    name: Turn 4 Exit
+    type: corner_exit
+    start_m: 1800
+    end_m: 2060
+    width_m: 13
+    overtaking_viability: medium
+    primary_recharge_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 34
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 20
+  - id: austria_t10_exit
+    name: Turn 10 Exit
+    type: corner_exit
+    start_m: 4180
+    end_m: 4318
+    width_m: 13
+    overtaking_viability: low
+    kerbs:
+      outside:
+        type: serrated
+        height_mm: 45
+        width_m: 1.2
+        grip_dry: 0.78
+        grip_wet: 0.41
+        destabilization_factor: 0.24
+        track_limits_sensitive: true
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.995
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.04
+    risk:
+      unsafe_closing_speed_threshold_kph: 38
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 22

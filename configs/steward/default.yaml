@@ -1,0 +1,10 @@
+steward_strictness: medium
+detection_probability:
+  track_limits: 0.98
+  unsafe_defending: 0.8
+  active_aero_misuse: 0.7
+  unsafe_rejoin: 0.85
+grey_area_bias:
+  racing_incident: 0.4
+  penalty: 0.35
+  warning: 0.25

@@ -1,0 +1,69 @@
+track_id: singapore
+name: Marina Bay Street Circuit
+country: Singapore
+length_m: 4940
+turns: 19
+laps: 62
+race_distance_m: 306143
+avg_speed_kph: 175
+fidelity_level: 4
+segments:
+  - id: singapore_t1
+    name: Turn 1 Complex
+    type: braking_zone
+    start_m: 0
+    end_m: 250
+    width_m: 14
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 32
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: high
+      barrier_distance_m: 16
+  - id: singapore_mid_sector
+    name: Mid Sector Walls
+    type: technical_complex
+    start_m: 1700
+    end_m: 2400
+    width_m: 10
+    overtaking_viability: low
+    runoff:
+      outside: {type: wall_close, width_m: 2, grip_dry: 0.2, grip_wet: 0.1, rejoin_risk: high}
+    risk:
+      unsafe_closing_speed_threshold_kph: 18
+      side_by_side_risk: critical
+      evasive_action_margin: low
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 5
+      impact_severity_multiplier: 1.45
+  - id: singapore_long_straight
+    name: Long Straight
+    type: straight
+    start_m: 2900
+    end_m: 3500
+    width_m: 13
+    overtaking_viability: high
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 48
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 18
+  - id: singapore_final_sector
+    name: Final Sector
+    type: technical_complex
+    start_m: 4100
+    end_m: 4940
+    width_m: 11
+    overtaking_viability: low
+    primary_recharge_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 22
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 8

@@ -1,0 +1,94 @@
+track_id: suzuka
+name: Suzuka Circuit
+country: Japan
+length_m: 5807
+turns: 18
+laps: 53
+race_distance_m: 307471
+avg_speed_kph: 220
+fidelity_level: 4
+segments:
+  - id: suzuka_start_finish
+    name: Start Finish Straight
+    type: straight
+    start_m: 0
+    end_m: 650
+    width_m: 15
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    surface:
+      main_track: {type: asphalt, grip_dry: 1.0, grip_wet: 0.72}
+    runoff:
+      outside: {type: asphalt, width_m: 10, grip_dry: 0.82, grip_wet: 0.56}
+    risk:
+      unsafe_closing_speed_threshold_kph: 55
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 28
+  - id: suzuka_spoon_entry
+    name: Spoon Curve Entry
+    type: high_speed_corner_entry
+    start_m: 3900
+    end_m: 4100
+    width_m: 13
+    radius_m: 120
+    overtaking_viability: low
+    primary_recharge_zone: true
+    runoff:
+      outside: {type: grass_gravel_barrier, width_m: 12, grip_dry: 0.32, grip_wet: 0.12, rejoin_risk: high}
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.92
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.03
+    risk:
+      unsafe_closing_speed_threshold_kph: 45
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: critical
+      active_aero_sensitivity: high
+      barrier_distance_m: 18
+      impact_severity_multiplier: 1.35
+  - id: suzuka_130r
+    name: 130R
+    type: ultra_fast_corner
+    start_m: 5000
+    end_m: 5200
+    width_m: 14
+    radius_m: 300
+    overtaking_viability: low
+    risk:
+      unsafe_closing_speed_threshold_kph: 40
+      side_by_side_risk: critical
+      evasive_action_margin: low
+      energy_delta_sensitivity: high
+      active_aero_sensitivity: critical
+      barrier_distance_m: 22
+      impact_severity_multiplier: 1.4
+  - id: suzuka_chicane
+    name: Casio Triangle
+    type: chicane
+    start_m: 5500
+    end_m: 5807
+    width_m: 12
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.98
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.05
+    risk:
+      unsafe_closing_speed_threshold_kph: 35
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 25

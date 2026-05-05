@@ -1,0 +1,67 @@
+track_id: barcelona
+name: Circuit de Barcelona-Catalunya
+country: Spain
+length_m: 4677
+turns: 16
+laps: 66
+race_distance_m: 308424
+avg_speed_kph: 205
+fidelity_level: 4
+segments:
+  - id: barcelona_t1
+    name: Turn 1
+    type: braking_zone
+    start_m: 0
+    end_m: 260
+    width_m: 14
+    overtaking_viability: high
+    preferred_battle_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 46
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 26
+  - id: barcelona_t3
+    name: Turn 3
+    type: long_fast_corner
+    start_m: 820
+    end_m: 1300
+    width_m: 13
+    overtaking_viability: low
+    risk:
+      unsafe_closing_speed_threshold_kph: 30
+      side_by_side_risk: high
+      evasive_action_margin: low
+      energy_delta_sensitivity: medium
+      active_aero_sensitivity: high
+      barrier_distance_m: 24
+  - id: barcelona_back_straight
+    name: Back Straight
+    type: straight
+    start_m: 2200
+    end_m: 2900
+    width_m: 13
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 50
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 30
+  - id: barcelona_last_sector
+    name: Final Sector
+    type: technical_complex
+    start_m: 3900
+    end_m: 4677
+    width_m: 12
+    overtaking_viability: low
+    primary_recharge_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 24
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: low
+      barrier_distance_m: 22

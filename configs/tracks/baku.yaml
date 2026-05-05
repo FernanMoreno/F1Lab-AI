@@ -1,0 +1,79 @@
+track_id: baku
+name: Baku City Circuit
+country: Azerbaijan
+length_m: 6003
+turns: 20
+laps: 51
+race_distance_m: 306153
+avg_speed_kph: 205
+fidelity_level: 4
+segments:
+  - id: baku_main_straight
+    name: Main Straight
+    type: straight
+    start_m: 0
+    end_m: 1100
+    width_m: 15
+    overtaking_viability: high
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 60
+      side_by_side_risk: medium
+      evasive_action_margin: high
+      energy_delta_sensitivity: critical
+      active_aero_sensitivity: high
+      barrier_distance_m: 30
+  - id: baku_t1_braking
+    name: Turn 1 Braking
+    type: braking_zone
+    start_m: 1100
+    end_m: 1300
+    width_m: 16
+    overtaking_viability: high
+    preferred_battle_zone: true
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.97
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.06
+    risk:
+      unsafe_closing_speed_threshold_kph: 55
+      side_by_side_risk: high
+      evasive_action_margin: medium
+      energy_delta_sensitivity: critical
+      barrier_distance_m: 25
+  - id: baku_castle
+    name: Castle Section
+    type: narrow_complex
+    start_m: 3200
+    end_m: 3500
+    width_m: 8
+    overtaking_viability: low
+    runoff:
+      outside: {type: wall_close, width_m: 2, grip_dry: 0.2, grip_wet: 0.1, rejoin_risk: high}
+    risk:
+      unsafe_closing_speed_threshold_kph: 20
+      side_by_side_risk: critical
+      evasive_action_margin: low
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 6
+      impact_severity_multiplier: 1.5
+  - id: baku_sector3
+    name: Sector 3 Sweep
+    type: fast_flow
+    start_m: 4700
+    end_m: 6003
+    width_m: 13
+    overtaking_viability: medium
+    primary_recharge_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 42
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      active_aero_sensitivity: high
+      barrier_distance_m: 18

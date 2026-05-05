@@ -1,0 +1,17 @@
+name: windy_baku
+air_temperature_c: 24
+track_temperature_c: 32
+humidity_percent: 58
+pressure_hpa: 1012
+wind_speed_mps: 8.5
+wind_direction_deg: 110
+rain_intensity_mm_h: 0.0
+cloud_cover_pct: 30
+visibility_m: 1000
+grip_level: 0.95
+rubber_level: 0.36
+wetness_level: 0.0
+standing_water_level: 0.0
+dirt_offline_level: 0.2
+drying_rate: 0.02
+track_evolution_rate: 0.01

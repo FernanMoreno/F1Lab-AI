@@ -1,0 +1,93 @@
+track_id: monza
+name: Autodromo Nazionale Monza
+country: Italy
+length_m: 5793
+turns: 11
+laps: 53
+race_distance_m: 306720
+avg_speed_kph: 250
+fidelity_level: 4
+segments:
+  - id: monza_start_finish
+    name: Start Finish Straight
+    type: straight
+    start_m: 0
+    end_m: 1120
+    width_m: 15
+    overtaking_viability: high
+    preferred_battle_zone: true
+    primary_boost_zone: true
+    risk:
+      unsafe_closing_speed_threshold_kph: 62
+      side_by_side_risk: medium
+      evasive_action_margin: high
+      energy_delta_sensitivity: critical
+      barrier_distance_m: 34
+  - id: monza_t1
+    name: Rettifilo Chicane
+    type: chicane
+    start_m: 1120
+    end_m: 1350
+    width_m: 16
+    overtaking_viability: high
+    preferred_battle_zone: true
+    kerbs:
+      outside:
+        type: sausage
+        height_mm: 90
+        width_m: 0.8
+        grip_dry: 0.65
+        grip_wet: 0.35
+        destabilization_factor: 0.7
+        bottoming_risk: high
+        launch_risk: high
+        track_limits_sensitive: true
+    track_limits:
+      rule: rejoin_bollards
+      allowed_wheels_out: 0
+      detection_probability: 0.98
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.08
+    risk:
+      unsafe_closing_speed_threshold_kph: 58
+      side_by_side_risk: high
+      evasive_action_margin: medium
+      energy_delta_sensitivity: critical
+      barrier_distance_m: 22
+  - id: monza_lesmo
+    name: Lesmo Sequence
+    type: medium_speed_corner
+    start_m: 2600
+    end_m: 3200
+    width_m: 12
+    overtaking_viability: low
+    risk:
+      unsafe_closing_speed_threshold_kph: 30
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: medium
+      barrier_distance_m: 21
+  - id: monza_parabolica
+    name: Parabolica Exit
+    type: long_corner_exit
+    start_m: 5200
+    end_m: 5793
+    width_m: 14
+    overtaking_viability: medium
+    preferred_battle_zone: true
+    track_limits:
+      rule: white_line
+      allowed_wheels_out: 0
+      detection_probability: 0.97
+      warning_threshold: 3
+      penalty_after: 4
+      time_gain_sensitive: true
+      estimated_gain_if_abused_s: 0.05
+    risk:
+      unsafe_closing_speed_threshold_kph: 42
+      side_by_side_risk: medium
+      evasive_action_margin: medium
+      energy_delta_sensitivity: high
+      barrier_distance_m: 26

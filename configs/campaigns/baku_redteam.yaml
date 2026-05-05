@@ -1,0 +1,36 @@
+campaign_name: baku_redteam_campaign
+description: Event-driven campaign for energy delta and closing speed exploits.
+regulation: regulation_2026_initial
+tracks: [baku, monza]
+scale_preset: pack
+mode: llm_event_driven
+seed: 7
+repetitions: 2
+conditions:
+  name: windy_baku
+  air_temperature_c: 24
+  track_temperature_c: 31
+  humidity_percent: 56
+  wind_speed_mps: 8.0
+  wind_direction_deg: 100
+  rain_intensity_mm_h: 0.0
+  visibility_m: 1000
+  grip_level: 0.95
+  rubber_level: 0.38
+  wetness_level: 0.0
+  standing_water_level: 0.0
+  dirt_offline_level: 0.2
+  drying_rate: 0.02
+  track_evolution_rate: 0.01
+forecast:
+  rain_expected_lap: null
+  confidence: 0.4
+  rain_intensity_expected: none
+  wind_warning: high_crosswind
+enforcement:
+  steward_strictness: medium
+objectives:
+  - unsafe_closing_speed
+  - battery_dominance
+  - legal_loophole
+  - grey_area_exploit
