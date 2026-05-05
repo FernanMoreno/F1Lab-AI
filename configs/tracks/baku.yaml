@@ -17,6 +17,9 @@ fidelity_notes:
   - Fine-grained wall geometry still pending.
 metadata:
   track_family: long_straight_street
+  circuit_id: baku
+  latitude: 40.3725
+  longitude: 49.8533
   local_risk_focus:
     - baku_main_straight
     - baku_old_city

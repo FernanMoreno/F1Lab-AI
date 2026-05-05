@@ -11,11 +11,22 @@ import yaml
 from reglabsim.campaigns.runner import CampaignRunner
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.conditions.repository import ConditionProfileRepository
-from reglabsim.data import FastF1Client, JolpicaClient, OpenF1Client, SessionQuery, UnifiedDataSource
+from reglabsim.conditions.scenarios import ConditionsScenario, ForecastState, TrackState, WeatherState
+from reglabsim.data import (
+    FastF1Client,
+    JolpicaClient,
+    LocalDataLake,
+    OpenF1Client,
+    OpenMeteoClient,
+    SessionQuery,
+    UnifiedDataSource,
+)
 from reglabsim.failures.classifier import FailureClassifier
 from reglabsim.logging.replay import ReplayEngine
+from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
 from reglabsim.track.track_loader import TrackRepository
+from reglabsim.validation.public_session import PublicSessionValidator
 from reglabsim.vehicle.car_family import CarFamily
 
 
@@ -44,6 +55,8 @@ class SimulationFacadeImpl:
         self._replay = ReplayEngine()
         self._failure_classifier = FailureClassifier()
         self._unified_data_source: UnifiedDataSource | None = None
+        self._openmeteo_client: OpenMeteoClient | None = None
+        self._metric_registry = MetricRegistryImpl()
 
     # ------------------------------------------------------------------
     # Registry loading
@@ -127,6 +140,13 @@ class SimulationFacadeImpl:
             unified.connect()
             self._unified_data_source = unified
         return self._unified_data_source
+
+    def _weather_source(self) -> OpenMeteoClient:
+        if self._openmeteo_client is None:
+            client = OpenMeteoClient()
+            client.connect()
+            self._openmeteo_client = client
+        return self._openmeteo_client
 
     # ------------------------------------------------------------------
     # Public registry API
@@ -216,6 +236,96 @@ class SimulationFacadeImpl:
         """Fetch and persist Jolpica weekend results/qualifying."""
         persisted = self._data_source().ingest_jolpica_weekend(season, round_num, data_root=data_root)
         return {key: dataset.to_dict() for key, dataset in persisted.items()}
+
+    def ingest_historical_weather(
+        self,
+        *,
+        track_id: str,
+        start_date: str,
+        end_date: str,
+        data_root: str = "data",
+    ) -> dict[str, Any]:
+        """Fetch and persist hourly historical weather for one track."""
+        track = self._track_repo.get(track_id)
+        latitude = float(track.metadata["latitude"])
+        longitude = float(track.metadata["longitude"])
+        frame = self._weather_source().fetch_historical_weather(
+            latitude=latitude,
+            longitude=longitude,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        lake = LocalDataLake(data_root)
+        partition = f"track={track_id}/date={start_date}_to_{end_date}"
+        raw = lake.persist_frame(
+            frame,
+            layer="raw",
+            source="openmeteo",
+            dataset_name="historical_weather",
+            partition=partition,
+            metadata={"track_id": track_id, "latitude": latitude, "longitude": longitude},
+        )
+        silver = lake.persist_frame(
+            frame.rename(columns=str.lower),
+            layer="silver",
+            source="openmeteo",
+            dataset_name="historical_weather",
+            partition=partition,
+            metadata={"track_id": track_id, "latitude": latitude, "longitude": longitude},
+        )
+        return {"raw": raw.to_dict(), "silver": silver.to_dict()}
+
+    def build_weather_profile(
+        self,
+        *,
+        track_id: str,
+        start_date: str,
+        end_date: str,
+        profile_id: str | None = None,
+        save_profile: bool = True,
+        data_root: str = "data",
+    ) -> dict[str, Any]:
+        """Build one condition profile from historical weather averages."""
+        ingestion = self.ingest_historical_weather(
+            track_id=track_id,
+            start_date=start_date,
+            end_date=end_date,
+            data_root=data_root,
+        )
+        lake = LocalDataLake(data_root)
+        partition = f"track={track_id}/date={start_date}_to_{end_date}"
+        weather_frame = lake.load_frame(
+            layer="silver",
+            source="openmeteo",
+            dataset_name="historical_weather",
+            partition=partition,
+        )
+        scenario = self._condition_scenario_from_weather_frame(
+            track_id=track_id,
+            profile_name=profile_id or f"{track_id}_{start_date}_{end_date}",
+            weather_frame=weather_frame,
+            metadata={
+                "sources": ["openmeteo", "track_metadata_seed"],
+                "validation_status": "generated_from_historical_weather",
+                "date_range": {"start_date": start_date, "end_date": end_date},
+            },
+        )
+        saved_path = None
+        if save_profile:
+            saved_path = str(self._conditions_repo.save(scenario, profile_id or scenario.name))
+        return {
+            "profile": self.load_condition_profile(profile_id or scenario.name)
+            if save_profile
+            else {
+                "name": scenario.name,
+                "weather": vars(scenario.weather),
+                "track": vars(scenario.track),
+                "forecast": vars(scenario.forecast),
+                "metadata": scenario.metadata,
+            },
+            "saved_path": saved_path,
+            "ingestion": ingestion,
+        }
 
     # ------------------------------------------------------------------
     # Legacy experiment compatibility
@@ -389,19 +499,41 @@ class SimulationFacadeImpl:
         }
 
     def compute_metrics(self, simulation_output: dict[str, Any], metric_names: list[str] | None = None) -> dict[str, Any]:
-        metrics = simulation_output.get("metrics")
-        if metrics is None and "_run_output" in simulation_output:
-            metrics = simulation_output["_run_output"].get("metrics")
-        if metrics is None and "overtakes" in simulation_output:
-            overtakes = simulation_output.get("overtakes", [])
-            metrics = {
-                "total_overtakes": len(overtakes),
-                "avg_closing_speed_kph": sum(item.get("closing_speed_kph", 0.0) for item in overtakes)
-                / max(len(overtakes), 1),
-            }
-        if metrics is not None:
-            return metrics if metric_names is None else {name: metrics.get(name) for name in metric_names}
-        return {}
+        run_output = simulation_output.get("_run_output", simulation_output)
+        base_metrics = dict(run_output.get("metrics", {}))
+        if "overtakes" in simulation_output and "event_log" not in run_output:
+            base_metrics.setdefault("total_overtakes", len(simulation_output.get("overtakes", [])))
+        derived_metrics = self._metric_registry.calculate_all(run_output)
+        combined = {**base_metrics, **derived_metrics}
+        if metric_names is None:
+            return combined
+        return {name: combined.get(name) for name in metric_names}
+
+    def validate_against_public_session(
+        self,
+        *,
+        config_path: str | Path,
+        year: int,
+        track_id: str,
+        session_type: str,
+        data_root: str = "data",
+        driver_numbers: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Run one campaign config and compare it against public session data."""
+        self.ingest_public_session_data(
+            year=year,
+            track_id=track_id,
+            session_type=session_type,
+            driver_numbers=driver_numbers or [],
+            data_root=data_root,
+        )
+        run_output = self.run_multiagent_race(config_path)
+        validator = PublicSessionValidator(data_root=data_root)
+        report = validator.validate_run_against_session(
+            run_output=run_output,
+            query=SessionQuery(year=year, track_id=track_id, session_type=session_type),
+        )
+        return report
 
     # ------------------------------------------------------------------
     # Helpers
@@ -410,6 +542,58 @@ class SimulationFacadeImpl:
     def _load_yaml(self, path: str | Path) -> dict[str, Any]:
         with open(path, encoding="utf-8") as handle:
             return yaml.safe_load(handle)
+
+    def _condition_scenario_from_weather_frame(
+        self,
+        *,
+        track_id: str,
+        profile_name: str,
+        weather_frame: Any,
+        metadata: dict[str, Any],
+    ) -> ConditionsScenario:
+        if weather_frame.empty:
+            raise ValueError("Cannot build condition profile from empty weather frame")
+        air_temp_c = float(weather_frame["air_temperature"].mean())
+        humidity_pct = float(weather_frame["humidity"].mean())
+        pressure_hpa = float(weather_frame["pressure"].mean())
+        wind_speed_mps = float(weather_frame["wind_speed"].mean() / 3.6) if weather_frame["wind_speed"].max() > 25 else float(weather_frame["wind_speed"].mean())
+        wind_direction_deg = float(weather_frame["wind_direction"].dropna().mean()) if weather_frame["wind_direction"].notna().any() else 0.0
+        rain_intensity_mm_h = float(weather_frame["rainfall"].mean())
+        visibility_m = 1000.0 if rain_intensity_mm_h < 0.5 else max(250.0, 1000.0 - rain_intensity_mm_h * 80.0)
+        track_temp_c = air_temp_c + max(4.0, min(18.0, 8.0 + wind_speed_mps * 0.4))
+        wetness_level = min(1.0, rain_intensity_mm_h / 8.0)
+        scenario = ConditionsScenario(
+            name=profile_name,
+            weather=WeatherState(
+                air_temp_c=air_temp_c,
+                humidity_pct=humidity_pct,
+                pressure_hpa=pressure_hpa,
+                wind_speed_mps=wind_speed_mps,
+                wind_direction_deg=wind_direction_deg,
+                rain_intensity_mm_h=rain_intensity_mm_h,
+                cloud_cover_pct=50.0,
+                visibility_m=visibility_m,
+            ),
+            track=TrackState(
+                track_temp_c=track_temp_c,
+                grip_level=max(0.65, 1.0 - wetness_level * 0.35),
+                rubber_level=0.32,
+                wetness_level=wetness_level,
+                standing_water_level=min(0.35, wetness_level * 0.4),
+                dirt_offline_level=0.22,
+                drying_rate=max(0.003, 0.02 - wetness_level * 0.012),
+                surface_evolution_rate=0.008,
+            ),
+            forecast=ForecastState(
+                rain_expected_lap=None,
+                confidence=0.55,
+                rain_intensity_expected="light" if rain_intensity_mm_h > 0.2 else "none",
+                wind_warning="high_crosswind" if wind_speed_mps >= 7.0 else "",
+                track_crossover_estimate_lap=None,
+            ),
+            metadata={**metadata, "track_id": track_id},
+        )
+        return scenario
 
 
 def create_facade(config_dir: str | Path = "configs", **kwargs: Any) -> SimulationFacadeImpl:

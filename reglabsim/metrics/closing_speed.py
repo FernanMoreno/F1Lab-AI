@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from reglabsim.metrics.base import MetricBase
+from reglabsim.metrics.helpers import extract_events
 
 
 class DangerousClosingSpeedIndex(MetricBase):
@@ -33,14 +34,15 @@ class DangerousClosingSpeedIndex(MetricBase):
         Returns:
             Ratio of dangerous to total overtakes.
         """
-        overtakes = simulation_output.get("overtakes", [])
+        overtakes = extract_events(simulation_output, "overtake", "incident")
 
         if not overtakes:
             return 0.0
 
         dangerous_count = 0
         for overtake in overtakes:
-            closing_speed = overtake.get("closing_speed_kph", 0)
+            details = overtake.get("details", overtake)
+            closing_speed = details.get("closing_speed_kph", overtake.get("closing_speed_kph", 0))
             if closing_speed > self._threshold_kph:
                 dangerous_count += 1
 

@@ -17,6 +17,9 @@ fidelity_notes:
   - L4 target still pending richer kerb/runoff geometry.
 metadata:
   track_family: high_speed_technical
+  circuit_id: suzuka
+  latitude: 34.8431
+  longitude: 136.5419
   local_risk_focus:
     - spoon_entry
     - 130r

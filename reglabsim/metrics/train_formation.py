@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from reglabsim.metrics.base import MetricBase
+from reglabsim.metrics.helpers import positions_history
 
 
 class TrainFormationIndex(MetricBase):
@@ -32,18 +33,18 @@ class TrainFormationIndex(MetricBase):
         Returns:
             Ratio of train formation laps.
         """
-        positions_history = simulation_output.get("positions_history", [])
+        history = positions_history(simulation_output)
 
-        if not positions_history or len(positions_history) < 2:
+        if not history or len(history) < 2:
             return 0.0
 
         # Count situations where positions didn't change but were close
         no_change_count = 0
         total_count = 0
 
-        for i in range(1, len(positions_history)):
-            prev = positions_history[i - 1]
-            curr = positions_history[i]
+        for i in range(1, len(history)):
+            prev = history[i - 1]
+            curr = history[i]
 
             # Check if positions were stable but competitive
             # Simplified: if lead positions didn't change, count as potential train

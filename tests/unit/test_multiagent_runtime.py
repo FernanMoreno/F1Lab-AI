@@ -25,12 +25,15 @@ def test_multiagent_race_generates_complete_logs(tmp_path: Path) -> None:
     config_path = _campaign_config(tmp_path, "suzuka_mini_multiagent.yaml")
 
     result = facade.run_multiagent_race(config_path)
+    derived_metrics = facade.compute_metrics(result)
 
     assert result["manifest"]["track_id"] == "suzuka"
     assert result["manifest"]["mode"] == "llm_event_driven"
     assert len(result["state_snapshots"]) == 13
     assert result["metrics"]["attack_events"] >= 1
     assert "summary_markdown" in result
+    assert "weather_sensitivity_index" in derived_metrics
+    assert "track_limits_exploit_index" in derived_metrics
     assert Path(config_path.parent / "runs" / result["manifest"]["run_id"]).exists()
 
 

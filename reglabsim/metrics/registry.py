@@ -103,10 +103,16 @@ class MetricRegistryImpl(MetricRegistry):
         from reglabsim.metrics.train_formation import TrainFormationIndex
         from reglabsim.metrics.dominance import DominantArchitectureRisk
         from reglabsim.metrics.robustness import RegulationRobustnessScore
+        from reglabsim.metrics.track_limits_exploit import TrackLimitsExploitIndex
+        from reglabsim.metrics.unsafe_rejoin import UnsafeRejoinRiskIndex
+        from reglabsim.metrics.weather_sensitivity import WeatherSensitivityIndex
 
         self.register(BatteryDependencyIndex())
         self.register(ArtificialPassIndex())
         self.register(DangerousClosingSpeedIndex())
         self.register(TrainFormationIndex())
         self.register(DominantArchitectureRisk())
+        self.register(TrackLimitsExploitIndex())
+        self.register(UnsafeRejoinRiskIndex())
+        self.register(WeatherSensitivityIndex())
         self.register(RegulationRobustnessScore())

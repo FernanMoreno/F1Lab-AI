@@ -16,6 +16,9 @@ fidelity_notes:
   - Balanced reference circuit for architecture comparison.
 metadata:
   track_family: balanced_reference
+  circuit_id: catalunya
+  latitude: 41.57
+  longitude: 2.2611
   local_risk_focus:
     - barcelona_t1
     - barcelona_final_corner

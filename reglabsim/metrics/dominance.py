@@ -34,6 +34,8 @@ class DominantArchitectureRisk(MetricBase):
         """
         # Get win rate distribution
         cars = simulation_output.get("cars", [])
+        if not cars and simulation_output.get("state_snapshots"):
+            cars = simulation_output["state_snapshots"][-1].get("cars", [])
 
         if not cars:
             return 0.0

@@ -621,6 +621,43 @@ class SimulationFacade(Protocol):
         """Ingest one public session bundle into the local data lake."""
         ...
 
+    def ingest_historical_weather(
+        self,
+        *,
+        track_id: str,
+        start_date: str,
+        end_date: str,
+        data_root: str = "data",
+    ) -> Dict[str, Any]:
+        """Ingest historical weather into the local data lake."""
+        ...
+
+    def build_weather_profile(
+        self,
+        *,
+        track_id: str,
+        start_date: str,
+        end_date: str,
+        profile_id: Optional[str] = None,
+        save_profile: bool = True,
+        data_root: str = "data",
+    ) -> Dict[str, Any]:
+        """Build a reusable conditions profile from historical weather."""
+        ...
+
+    def validate_against_public_session(
+        self,
+        *,
+        config_path: str | Path,
+        year: int,
+        track_id: str,
+        session_type: str,
+        data_root: str = "data",
+        driver_numbers: Optional[List[int]] = None,
+    ) -> Dict[str, Any]:
+        """Validate one campaign config against an ingested public session."""
+        ...
+
 
 # =============================================================================
 # Type Aliases

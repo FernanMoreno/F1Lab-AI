@@ -15,6 +15,9 @@ fidelity_notes:
   - Track-limit and kerb exploitation focus.
 metadata:
   track_family: short_power_track
+  circuit_id: red_bull_ring
+  latitude: 47.2197
+  longitude: 14.7647
   local_risk_focus:
     - austria_t4
     - austria_t10_exit

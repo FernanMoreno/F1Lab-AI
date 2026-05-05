@@ -15,6 +15,9 @@ fidelity_notes:
   - Wall proximity and train-risk emphasis.
 metadata:
   track_family: narrow_street
+  circuit_id: monaco
+  latitude: 43.7347
+  longitude: 7.4206
   local_risk_focus:
     - monaco_sainte_devote
     - monaco_harbour_chicane

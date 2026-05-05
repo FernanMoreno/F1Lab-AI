@@ -47,6 +47,44 @@ def ingest_weekend_results(
     typer.echo(json.dumps(result, indent=2))
 
 
+@app.command("ingest-historical-weather")
+def ingest_historical_weather(
+    track_id: str = typer.Argument(..., help="Track id"),
+    start_date: str = typer.Argument(..., help="YYYY-MM-DD"),
+    end_date: str = typer.Argument(..., help="YYYY-MM-DD"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+) -> None:
+    facade = create_facade()
+    result = facade.ingest_historical_weather(
+        track_id=track_id,
+        start_date=start_date,
+        end_date=end_date,
+        data_root=data_root,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("build-weather-profile")
+def build_weather_profile(
+    track_id: str = typer.Argument(..., help="Track id"),
+    start_date: str = typer.Argument(..., help="YYYY-MM-DD"),
+    end_date: str = typer.Argument(..., help="YYYY-MM-DD"),
+    profile_id: str | None = typer.Option(None, help="Optional profile id"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+    save_profile: bool = typer.Option(True, help="Persist generated YAML profile"),
+) -> None:
+    facade = create_facade()
+    result = facade.build_weather_profile(
+        track_id=track_id,
+        start_date=start_date,
+        end_date=end_date,
+        profile_id=profile_id,
+        save_profile=save_profile,
+        data_root=data_root,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
 @app.command("describe-track")
 def describe_track(track_id: str = typer.Argument(..., help="Track id")) -> None:
     facade = create_facade()
@@ -107,6 +145,28 @@ def compare_regulations(
 ) -> None:
     facade = create_facade()
     result = facade.compare_regulations(regulation_a, regulation_b, experiment_config, n_repetitions=repetitions)
+    typer.echo(json.dumps(result, indent=2))
+
+
+@app.command("validate-public-session")
+def validate_public_session(
+    config: Path = typer.Argument(..., exists=True, readable=True),
+    year: int = typer.Argument(..., help="Season year"),
+    track_id: str = typer.Argument(..., help="Track id"),
+    session_type: str = typer.Argument(..., help="Session type"),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+    drivers: str = typer.Option("", help="Comma-separated driver numbers"),
+) -> None:
+    facade = create_facade()
+    driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
+    result = facade.validate_against_public_session(
+        config_path=config,
+        year=year,
+        track_id=track_id,
+        session_type=session_type,
+        data_root=data_root,
+        driver_numbers=driver_numbers,
+    )
     typer.echo(json.dumps(result, indent=2))
 
 

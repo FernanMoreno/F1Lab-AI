@@ -38,11 +38,15 @@ class RegulationRobustnessScore(MetricBase):
         Returns:
             Overall score 0-1 (higher is better).
         """
-        # Get component scores
-        battery_dep = simulation_output.get("battery_dependency_index", 0.3)
-        artificial_pass = simulation_output.get("artificial_pass_index", 0.3)
-        closing_speed = simulation_output.get("dangerous_closing_speed_index", 0.3)
-        train_form = simulation_output.get("train_formation_index", 0.3)
+        from reglabsim.metrics.artificial_pass import ArtificialPassIndex
+        from reglabsim.metrics.battery_dependency import BatteryDependencyIndex
+        from reglabsim.metrics.closing_speed import DangerousClosingSpeedIndex
+        from reglabsim.metrics.train_formation import TrainFormationIndex
+
+        battery_dep = BatteryDependencyIndex().calculate(simulation_output)
+        artificial_pass = ArtificialPassIndex().calculate(simulation_output)
+        closing_speed = DangerousClosingSpeedIndex().calculate(simulation_output)
+        train_form = TrainFormationIndex().calculate(simulation_output)
 
         # All should be low for good robustness
         # Convert each to a 0-1 score where 1 is good

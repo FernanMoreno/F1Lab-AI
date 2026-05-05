@@ -16,6 +16,9 @@ fidelity_notes:
   - High-speed aero stability focus.
 metadata:
   track_family: high_speed_aero
+  circuit_id: silverstone
+  latitude: 52.0786
+  longitude: -1.0169
   local_risk_focus:
     - silverstone_copse
     - silverstone_maggotts_becketts

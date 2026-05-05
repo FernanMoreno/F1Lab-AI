@@ -16,6 +16,9 @@ fidelity_notes:
   - High-speed braking and kerb-abuse primitives included.
 metadata:
   track_family: ultra_low_drag
+  circuit_id: monza
+  latitude: 45.6206
+  longitude: 9.2811
   local_risk_focus:
     - monza_t1
     - monza_ascari

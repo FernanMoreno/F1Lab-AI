@@ -180,7 +180,10 @@ class OpenF1Client:
         if query.driver_numbers:
             telemetry_frames = []
             for driver_number in query.driver_numbers:
-                telemetry_frames.append(self.fetch_telemetry(str(driver_number), session_key))
+                try:
+                    telemetry_frames.append(self.fetch_telemetry(str(driver_number), session_key))
+                except FetchError:
+                    continue
             bundle["telemetry"] = (
                 pd.concat(telemetry_frames, ignore_index=True) if telemetry_frames else pd.DataFrame()
             )

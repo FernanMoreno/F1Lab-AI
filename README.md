@@ -320,9 +320,13 @@ python -m reglabsim.cli describe-track suzuka
 python -m reglabsim.cli show-condition-profile windy_baku
 python -m reglabsim.cli ingest-session-data 2024 suzuka race --drivers 1
 python -m reglabsim.cli ingest-weekend-results 2024 1
+python -m reglabsim.cli ingest-historical-weather suzuka 2024-04-07 2024-04-07
+python -m reglabsim.cli build-weather-profile suzuka 2024-04-07 2024-04-07 --profile-id suzuka_openmeteo_2024
+python -m reglabsim.cli validate-public-session configs/campaigns/suzuka_mini_multiagent.yaml 2024 suzuka race
 ```
 
 Los comandos de ingestión guardan datasets reproducibles en `data/raw/` y `data/silver/` con manifiestos JSON y Parquet por partición.
+`validate-public-session` compara ritmo medio, clima e incidentes del run contra la sesión pública ingerida y devuelve un score de credibilidad proxy.
 
 ---
 

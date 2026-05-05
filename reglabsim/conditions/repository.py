@@ -35,6 +35,17 @@ class ConditionProfileRepository:
             self._cache[profile_id] = self._parse(data, default_name=profile_id)
         return self._cache[profile_id]
 
+    def save(self, scenario: ConditionsScenario, profile_id: str | None = None) -> Path:
+        """Persist one condition profile to YAML and cache it."""
+        target_id = profile_id or scenario.name
+        self._conditions_dir.mkdir(parents=True, exist_ok=True)
+        path = self._conditions_dir / f"{target_id}.yaml"
+        payload = self._to_flat_dict(scenario)
+        with open(path, "w", encoding="utf-8") as handle:
+            yaml.safe_dump(payload, handle, sort_keys=False)
+        self._cache[target_id] = scenario
+        return path
+
     def merge_inline(
         self,
         *,

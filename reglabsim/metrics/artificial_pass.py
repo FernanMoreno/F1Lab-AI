@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from reglabsim.metrics.base import MetricBase
+from reglabsim.metrics.helpers import extract_events
 
 
 class ArtificialPassIndex(MetricBase):
@@ -32,7 +33,7 @@ class ArtificialPassIndex(MetricBase):
         Returns:
             Value between 0 and 1.
         """
-        overtakes = simulation_output.get("overtakes", [])
+        overtakes = extract_events(simulation_output, "overtake")
 
         if not overtakes:
             return 0.0
@@ -42,8 +43,9 @@ class ArtificialPassIndex(MetricBase):
         total_passes = len(overtakes)
 
         for overtake in overtakes:
-            overtake_type = overtake.get("type", "normal")
-            energy_delta = overtake.get("energy_delta_mj", 0)
+            details = overtake.get("details", overtake)
+            overtake_type = overtake.get("type", overtake.get("event_type", "normal"))
+            energy_delta = details.get("energy_delta_mj", overtake.get("energy_delta_mj", 0))
 
             # Consider it energy-boosted if:
             # - Type is 'energy_boost'

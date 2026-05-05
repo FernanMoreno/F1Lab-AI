@@ -32,11 +32,28 @@ class BatteryDependencyIndex(MetricBase):
         Returns:
             Value between 0 and 1.
         """
-        # Extract relevant data
-        energy_used = simulation_output.get("energy_used_mj", 0)
-        energy_recovered = simulation_output.get("energy_recovered_mj", 0)
-        lap_time = simulation_output.get("lap_time_s", 80)
-        ers_soc_end = simulation_output.get("ers_soc_end", 0.8)
+        energy_used = float(simulation_output.get("energy_used_mj", 0.0))
+        energy_recovered = float(simulation_output.get("energy_recovered_mj", 0.0))
+        ers_soc_end = float(simulation_output.get("ers_soc_end", 0.8))
+
+        if "action_log" in simulation_output and "state_snapshots" in simulation_output:
+            boost_actions = sum(
+                1
+                for entry in simulation_output["action_log"]
+                if entry["action"].get("ers_mode") == "boost"
+            )
+            charge_actions = sum(
+                1
+                for entry in simulation_output["action_log"]
+                if entry["action"].get("ers_mode") == "charge"
+            )
+            cars = simulation_output["state_snapshots"][-1].get("cars", [])
+            start_cars = simulation_output["state_snapshots"][0].get("cars", [])
+            start_soc = sum(car.get("ers_soc", 0.0) for car in start_cars) / max(len(start_cars), 1)
+            end_soc = sum(car.get("ers_soc", 0.0) for car in cars) / max(len(cars), 1)
+            ers_soc_end = end_soc
+            energy_used = boost_actions * 0.35
+            energy_recovered = charge_actions * 0.28 + max(0.0, end_soc - start_soc) * 6.0
 
         # Calculate dependency ratio
         # Higher ERS usage relative to total energy = higher dependency
