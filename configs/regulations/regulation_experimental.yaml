@@ -1,0 +1,82 @@
+# Experimental F1 Regulations - Extreme Scenarios
+# Status: synthetic - for adversarial testing only
+
+name: regulation_experimental
+version: "experimental"
+status: synthetic
+
+description: |
+  Extreme regulatory scenarios designed to stress-test the simulation
+  and identify failure modes. Not intended to represent real regulations.
+
+power_unit:
+  architecture: hybrid_v6turbo
+  max_power_kw: 900
+  max_rpm: 18000
+  max_fuel_flow_kg_h: 110
+  fuel_capacity_kg: 120
+  ers_max_energy_mj: 12.0
+  ers_deployment_max_kw: 500
+  mgu_k_max_power_kw: 500
+  mgu_h_max_power_kw: 500
+
+active_aero:
+  enabled: true
+  modes:
+    - corner
+    - straight
+    - drs
+    - overtake
+  transition_time_s: 0.15
+  drag_reduction_max_cda_m2: 0.25
+  overtake_mode:
+    enabled: true
+    activation_gap_s: 0.3
+    boost_duration_s: 10.0
+    boost_energy_mj: 5.0
+    cooldown_time_s: 5.0
+
+aero:
+  active_aero: true
+  drs_zones: 2
+  drs_delta_min_s: 0.2
+
+tyres:
+  compounds: ["C0", "C1", "C2", "C3", "C4", "C5"]
+  max_pressures_psi: 30.0
+  min_pressures_psi: 15.0
+  pit_stop_min_time_s: 1.5
+  degradation_factor: 1.5
+
+safety:
+  max_closing_speed_kph: 80
+  min_grid_slots: 20
+  max_race_distance_km: 350
+  max_allowed_closing_speed_delta_kph: 80
+  grid_penalty_threshold: 3
+
+weights:
+  min_total_mass_kg: 740
+  min_driver_mass_kg: 75
+
+sessions:
+  quali_format: knockout
+  sprint_sessions: 6
+  parcourse_rules: false
+
+extreme_scenarios:
+  - name: battery_dominance
+    description: Extreme ERS creates battery-dependent racing
+  - name: artificial_overtaking
+    description: Low activation gap enables boost-based overtaking
+  - name: dangerous_closing_speeds
+    description: High boost power creates unsafe closing speeds
+  - name: train_formation
+    description: Equal cars creates unbreakable trains
+  - name: dominant_architecture
+    description: One car family dominates all circuits
+
+test_modes:
+  adversarial_search: true
+  monte_carlo_sweeps: true
+  sensitivity_analysis: true

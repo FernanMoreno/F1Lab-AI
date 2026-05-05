@@ -1,0 +1,63 @@
+# Baku 2026 Closing Speed Stress Test
+# Purpose: Detect dangerous closing speeds in active aero era
+
+experiment_name: baku_closing_speed_stress
+version: "1.0"
+description: |
+  Stress test for dangerous closing speeds at Baku street circuit.
+  Tests the hypothesis that high ERS deployment can create
+  unsafe closing speeds in braking zones.
+
+regulation: regulation_2026_initial
+track: baku
+
+simulation:
+  type: two_car_battle
+  laps: 8
+  repetitions: 5000
+  seed: 42
+  battle_positions: [1, 2, 3, 4]  # Grid positions to test
+
+attacker:
+  car_family: low_drag_missile
+  tyre_age_laps: 8
+  battery_soc: 0.85
+  boost_policy: aggressive
+  ers_mode: boost
+
+defender:
+  car_family: high_downforce_stable
+  tyre_age_laps: 10
+  battery_soc: 0.55
+  boost_policy: defensive
+  ers_mode: manage
+
+conditions:
+  air_temperature_c: 28
+  track_temperature_c: 38
+  wind_speed_mps: 2.5
+  humidity_percent: 45
+  grip_level: 0.95
+
+metrics:
+  - dangerous_closing_speed_index
+  - closing_speed_95th_percentile_kph
+  - max_closing_speed_kph
+  - brake_zone_incidents
+
+failure_thresholds:
+  dangerous_closing_speed_index: 0.05
+  max_closing_speed_kph: 350
+  closing_speed_95th_percentile_kph: 280
+
+expected_failure_modes:
+  - "High ERS deployment creates excessive closing speeds"
+  - "Battery advantage dominates defensive ability"
+  - "Boost mode too powerful for safe racing"
+
+analysis:
+  compare_against: regulation_2026_refined
+  sensitivity_analysis:
+    - ers_deployment_power
+    - activation_gap
+    - boost_duration

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  duckdb:
+    image: duckdb/duckdb:latest
+    container_name: f1lab-duckdb
+    volumes:
+      - ./data:/data
+      - ./configs/duckdb:/duckdb-config
+    command: >
+      /duckdb-config/schema.sql
+    ports:
+      - "7474:7474"
+      - "6868:6868"
+
+  reglabsim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: f1lab-reglabsim
+    volumes:
+      - .:/app
+      - ./data:/data
+      - ./configs:/configs
+    environment:
+      - PYTHONPATH=/app
+      - DATA_DIR=/data
+      - CONFIG_DIR=/configs
+    ports:
+      - "8888:8888"
+    depends_on:
+      - duckdb
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: f1lab-dashboard
+    volumes:
+      - .:/app
+      - ./data:/data
+      - ./configs:/configs
+    environment:
+      - PYTHONPATH=/app
+      - DATA_DIR=/data
+      - CONFIG_DIR=/configs
+    ports:
+      - "8501:8501"
+    depends_on:
+      - reglabsim
+    command: streamlit run /app/dashboards/streamlit_app.py --server.port=8501
+
+networks:
+  default:
+    name: f1lab-network

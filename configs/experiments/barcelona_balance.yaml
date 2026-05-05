@@ -1,0 +1,58 @@
+# Barcelona Balance Test
+# Purpose: Test if regulation biases toward one architecture
+
+experiment_name: barcelona_balance
+version: "1.0"
+description: |
+  Tests whether 2026 regulations create balanced competition or
+  favor one specific car architecture. Barcelona has a mix of
+  low-speed corners (favors downforce) and high-speed (favors drag).
+
+regulation: regulation_2026_initial
+track: barcelona
+
+simulation:
+  type: round_robin
+  laps: 66
+  repetitions: 1000
+  seed: 789
+
+car_families_to_test:
+  - low_drag_missile
+  - high_downforce_stable
+  - energy_efficient
+  - tyre_whisperer
+  - dirty_air_resistant
+  - race_pace_concept
+  - boost_dependent
+  - qualifying_specialist
+
+conditions:
+  air_temperature_c: 25
+  track_temperature_c: 35
+  wind_speed_mps: 3.0
+  grip_level: 1.0
+
+metrics:
+  - dominant_architecture_risk
+  - win_rate_per_family
+  - podium_rate_per_family
+  - regulation_robustness_score
+  - circuit_specific_performance
+
+failure_thresholds:
+  dominant_architecture_risk: 0.50
+  win_rate_variance: 0.25
+
+expected_failure_modes:
+  - "One architecture dominates all others"
+  - "ERS efficiency becomes primary differentiator"
+  - "Synthetic families show structural hierarchy"
+
+analysis:
+  compare_against: regulation_2025
+  compare_against: regulation_2026_refined
+  robustness_sweeps:
+    - dry_vs_wet
+    - high_vs_low_fuel
+    - new_vs_old_tires

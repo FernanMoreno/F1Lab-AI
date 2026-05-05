@@ -1,0 +1,60 @@
+# Monaco Train Index Test
+# Purpose: Detect train formation at tight street circuit
+
+experiment_name: monaco_train_index
+version: "1.0"
+description: |
+  Tests for train formation (cars stuck behind each other unable to pass)
+  at Monaco - the tightest, slowest circuit where overtaking is hardest.
+  High train index here indicates regulation fundamentally inhibits racing.
+
+regulation: regulation_2026_initial
+track: monaco
+
+simulation:
+  type: race_simulation
+  laps: 78
+  repetitions: 3000
+  seed: 456
+  qualifying_simulation: true
+
+race_config:
+  num_cars: 20
+  grid_start: true
+  car_families_distribution:
+    high_downforce_stable: 6
+    dirty_air_resistant: 6
+    race_pace_concept: 4
+    tyre_whisperer: 4
+
+  attack_defend_simulation: full
+  tire_deggradation: true
+
+conditions:
+  air_temperature_c: 20
+  track_temperature_c: 25
+  humidity_percent: 70
+  grip_level: 0.92
+
+metrics:
+  - train_formation_index
+  - overtakes_per_lap
+  - position_changes_per_lap
+  - avg_race_pace_spread
+
+failure_thresholds:
+  train_formation_index: 0.35
+  overtakes_per_lap: 0.5
+  avg_race_pace_spread: 1.5
+
+expected_failure_modes:
+  - "DRS and boost insufficient to overtake"
+  - "Cars form untrainable trains"
+  - "Strategy cannot overcome pace deficit"
+
+analysis:
+  compare_against: regulation_2026_refined
+  circuit_sensitivity:
+    - monaco
+    - hungary
+    - silverstone

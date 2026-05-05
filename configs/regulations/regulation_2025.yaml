@@ -1,0 +1,40 @@
+# F1 2025 Technical Regulations
+# Reference: Based on publicly available 2025 F1 regulations
+
+name: regulation_2025
+version: "2025.0"
+status: public
+
+power_unit:
+  architecture: hybrid_v6turbo
+  max_power_kw: 750
+  max_rpm: 15000
+  max_fuel_flow_kg_h: 100
+  fuel_capacity_kg: 110
+  ers_max_energy_mj: 4.0
+  ers_deployment_max_kw: 120
+
+aero:
+  active_aero: false
+  drs_zones: 1
+  drs_delta_min_s: 0.8
+
+tyres:
+  compounds: ["C0", "C1", "C2", "C3", "C4", "C5"]
+  max_pressures_psi: 28.0
+  min_pressures_psi: 18.0
+  pit_stop_min_time_s: 2.0
+
+safety:
+  max_closing_speed_kph: 50
+  min_grid_slots: 20
+  max_race_distance_km: 305
+
+weights:
+  min_total_mass_kg: 798
+  min_driver_mass_kg: 80
+
+sessions:
+  quali_format: knockout
+  sprint_sessions: 3
+  parcourse_rules: true

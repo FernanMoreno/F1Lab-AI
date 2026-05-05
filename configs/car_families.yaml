@@ -1,0 +1,121 @@
+# Synthetic F1 Car Families
+# These are NOT real team cars - they are synthetic archetypes for regulation testing
+
+car_families:
+  low_drag_missile:
+    description: High straight-line speed, low downforce - Monza specialist
+    mass_kg: 768
+    cda_straight_m2: 0.82
+    cda_corner_m2: 1.12
+    cla_straight_m2: 2.1
+    cla_corner_m2: 3.5
+    power_kw: 750
+    ers_efficiency: 0.70
+    tyre_deg_factor: 1.05
+    dirty_air_sensitivity: 0.12
+    strength: ["top_speed", "straight_line"]
+    weakness: ["cornering", "tyre_wear"]
+
+  high_downforce_stable:
+    description: Maximum downforce, stable in corners - Barcelona specialist
+    mass_kg: 770
+    cda_straight_m2: 0.95
+    cda_corner_m2: 1.25
+    cla_straight_m2: 2.5
+    cla_corner_m2: 4.2
+    power_kw: 740
+    ers_efficiency: 0.68
+    tyre_deg_factor: 0.96
+    dirty_air_sensitivity: 0.18
+    strength: ["cornering", "stability"]
+    weakness: ["top_speed", "energy_recovery"]
+
+  energy_efficient:
+    description: Optimized for ERS recovery and deployment
+    mass_kg: 765
+    cda_straight_m2: 0.88
+    cda_corner_m2: 1.18
+    cla_straight_m2: 2.2
+    cla_corner_m2: 3.7
+    power_kw: 730
+    ers_efficiency: 0.85
+    tyre_deg_factor: 1.00
+    dirty_air_sensitivity: 0.15
+    strength: ["ers_management", "energy_conservation"]
+    weakness: ["peak_power", "aero_efficiency"]
+
+  tyre_whisperer:
+    description: Gentle on tyres, sustainable race pace
+    mass_kg: 772
+    cda_straight_m2: 0.92
+    cda_corner_m2: 1.22
+    cla_straight_m2: 2.3
+    cla_corner_m2: 3.9
+    power_kw: 725
+    ers_efficiency: 0.72
+    tyre_deg_factor: 0.85
+    dirty_air_sensitivity: 0.14
+    strength: ["tyre_conservation", "sustainable_pace"]
+    weakness: ["qualifying_pace", "attack_mode"]
+
+  dirty_air_resistant:
+    description: Performs well in dirty air, good for races
+    mass_kg: 769
+    cda_straight_m2: 0.90
+    cda_corner_m2: 1.20
+    cla_straight_m2: 2.4
+    cla_corner_m2: 4.0
+    power_kw: 735
+    ers_efficiency: 0.74
+    tyre_deg_factor: 0.98
+    dirty_air_sensitivity: 0.08
+    strength: ["racing", "following_close"]
+    weakness: ["clean_air_pace", "overtaking"]
+
+  qualifying_specialist:
+    description: Optimized for single-lap qualifying pace
+    mass_kg: 760
+    cda_straight_m2: 0.85
+    cda_corner_m2: 1.15
+    cla_straight_m2: 2.0
+    cla_corner_m2: 3.4
+    power_kw: 760
+    ers_efficiency: 0.65
+    tyre_deg_factor: 1.15
+    dirty_air_sensitivity: 0.16
+    strength: ["qualifying", "peak_performance"]
+    weakness: ["race_pace", "tyre_conservation"]
+
+  race_pace_concept:
+    description: Balanced for race pace over qualifying
+    mass_kg: 771
+    cda_straight_m2: 0.89
+    cda_corner_m2: 1.19
+    cla_straight_m2: 2.25
+    cla_corner_m2: 3.8
+    power_kw: 728
+    ers_efficiency: 0.78
+    tyre_deg_factor: 0.92
+    dirty_air_sensitivity: 0.12
+    strength: ["race_pace", "consistent_laps"]
+    weakness: ["qualifying", "max_performance"]
+
+  boost_dependent:
+    description: Heavily relies on ERS boost for pace
+    mass_kg: 763
+    cda_straight_m2: 0.86
+    cda_corner_m2: 1.16
+    cla_straight_m2: 2.15
+    cla_corner_m2: 3.6
+    power_kw: 700
+    ers_efficiency: 0.90
+    tyre_deg_factor: 1.02
+    dirty_air_sensitivity: 0.14
+    strength: ["boost_pace", "energy_management"]
+    weakness: ["base_power", "low_battery_situations"]
+
+defaults:
+  brake_bias_range: [54, 58]  # percent rear
+  power_unit_modes: ["qualifying", "race", "push", "manage"]
+  ers_modes: ["boost", "hybrid", "charge", "off"]
+  active_aero_modes: ["straight", "corner", "drs"]

@@ -1,0 +1,63 @@
+# F1 2026 Initial Regulations (Proposed)
+# Status: synthetic/experimental - not real regulations
+
+name: regulation_2026_initial
+version: "2026-initial"
+status: synthetic
+
+power_unit:
+  architecture: hybrid_v6turbo
+  max_power_kw: 800
+  max_rpm: 15000
+  max_fuel_flow_kg_h: 95
+  fuel_capacity_kg: 100
+  ers_max_energy_mj: 8.0
+  ers_deployment_max_kw: 350
+  mgu_k_max_power_kw: 350
+  mgu_h_max_power_kw: 350
+
+active_aero:
+  enabled: true
+  modes:
+    - corner
+    - straight
+    - drs
+  transition_time_s: 0.25
+  drag_reduction_max_cda_m2: 0.15
+
+aero:
+  active_aero: true
+  drs_zones: 1
+  drs_delta_min_s: 0.5
+  overtake_mode:
+    enabled: true
+    activation_gap_s: 1.0
+    boost_duration_s: 5.0
+    boost_energy_mj: 2.0
+
+tyres:
+  compounds: ["C0", "C1", "C2", "C3", "C4", "C5"]
+  max_pressures_psi: 26.0
+  min_pressures_psi: 17.0
+  pit_stop_min_time_s: 2.0
+
+safety:
+  max_closing_speed_kph: 60
+  min_grid_slots: 20
+  max_race_distance_km: 305
+  max_allowed_closing_speed_delta_kph: 60
+
+weights:
+  min_total_mass_kg: 768
+  min_driver_mass_kg: 80
+
+sessions:
+  quali_format: knockout
+  sprint_sessions: 3
+  parcourse_rules: true
+
+assumptions:
+  - "ERS deployment increased significantly to encourage overtaking"
+  - "Active aero enabled for first time in F1 history"
+  - "Reduced fuel capacity to encourage energy management"
+  - "Overtake mode provides temporary boost advantage"

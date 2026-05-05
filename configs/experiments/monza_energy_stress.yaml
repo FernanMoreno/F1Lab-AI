@@ -1,0 +1,59 @@
+# Monza Energy Stress Test
+# Purpose: Test battery dependency at high-speed Monza circuit
+
+experiment_name: monza_energy_stress
+version: "1.0"
+description: |
+  Tests energy management requirements at Monza - the fastest F1 circuit.
+  High speeds mean high drag, high ERS recovery but also high consumption.
+  Tests whether racing becomes overly battery-dependent.
+
+regulation: regulation_2026_initial
+track: monza
+
+simulation:
+  type: race_simulation
+  laps: 53
+  repetitions: 2000
+  seed: 123
+  fuel_load_strategy: race_start
+
+race_config:
+  num_cars: 20
+  car_families_distribution:
+    low_drag_missile: 4
+    high_downforce_stable: 4
+    energy_efficient: 4
+    boost_dependent: 4
+    race_pace_concept: 4
+
+  pit_strategy: optimal
+  safety_car概率: 0.15
+  vsc_probability: 0.20
+
+conditions:
+  air_temperature_c: 22
+  track_temperature_c: 30
+  fuel_load_kg: 105
+  grip_level: 1.0
+
+metrics:
+  - battery_dependency_index
+  - energy_delta_at_pass
+  - energy_management_variance
+  - race_pace_vs_quali_pace_delta
+
+failure_thresholds:
+  battery_dependency_index: 0.40
+  energy_management_variance: 0.30
+
+expected_failure_modes:
+  - "Cars cannot race without constant energy management"
+  - "ERS becomes primary performance differentiator"
+  - "Tire strategies secondary to energy strategies"
+
+analysis:
+  compare_against: regulation_2026_refined
+  monte_carlo_sweeps:
+    - ers_max_energy: [4.0, 6.0, 8.0, 10.0]
+    - mgu_k_max_power: [200, 250, 300, 350, 400]
