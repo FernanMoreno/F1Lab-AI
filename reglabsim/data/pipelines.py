@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
@@ -43,6 +44,62 @@ class AddQueryMetadata(PipelineStep):
         if self._query.meeting_key is not None:
             result["query_meeting_key"] = self._query.meeting_key
         return result
+
+
+class NormalizeDatasetTypes(PipelineStep):
+    """Apply dataset-specific type normalization for analytics-safe tables."""
+
+    _LAP_MARKER = re.compile(r"\blaps?\b", re.IGNORECASE)
+
+    def __init__(self, dataset_name: str):
+        self._dataset_name = dataset_name
+
+    def transform(self, data: pd.DataFrame) -> pd.DataFrame:
+        if data.empty:
+            return data.copy()
+        if self._dataset_name == "intervals":
+            return self._normalize_intervals(data)
+        if self._dataset_name == "location":
+            return self._coerce_numeric_columns(data, ("x", "y", "z"))
+        if self._dataset_name == "position":
+            return self._coerce_numeric_columns(data, ("position",))
+        return data
+
+    def _normalize_intervals(self, data: pd.DataFrame) -> pd.DataFrame:
+        result = data.copy()
+        for column in ("interval", "gap_to_leader"):
+            if column not in result.columns:
+                continue
+            series = result[column]
+            if series.dropna().map(lambda value: isinstance(value, str)).any():
+                result[f"{column}_raw"] = series.astype("string")
+            result[column] = series.map(self._parse_interval_value).astype("Float64")
+        return result
+
+    def _coerce_numeric_columns(
+        self,
+        data: pd.DataFrame,
+        columns: tuple[str, ...],
+    ) -> pd.DataFrame:
+        result = data.copy()
+        for column in columns:
+            if column in result.columns:
+                result[column] = pd.to_numeric(result[column], errors="coerce")
+        return result
+
+    def _parse_interval_value(self, value: Any) -> float | None:
+        if value is None or pd.isna(value):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if not text or self._LAP_MARKER.search(text):
+            return None
+        cleaned = text.replace("+", "").replace("s", "").strip()
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
 
 
 class DataPipeline:
@@ -121,5 +178,6 @@ def standard_pipeline(*, query: SessionQuery, dataset_name: str) -> DataPipeline
     """Build the default normalization pipeline for public session data."""
     pipeline = DataPipeline(name=f"{dataset_name}_standard_pipeline")
     pipeline.add_step(NormalizeColumnNames())
+    pipeline.add_step(NormalizeDatasetTypes(dataset_name))
     pipeline.add_step(AddQueryMetadata(query))
     return pipeline

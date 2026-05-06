@@ -10,6 +10,8 @@ import yaml
 from reglabsim import create_facade
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.data import LocalDataLake, SessionQuery, UnifiedDataSource
+from reglabsim.data.openf1_client import OpenF1Client
+from reglabsim.data.pipelines import standard_pipeline
 from reglabsim.validation.public_session import PublicSessionValidator
 
 
@@ -50,6 +52,12 @@ class _FakeOpenF1Source:
             "weather": pd.DataFrame([{"air_temperature": 23.0, "track_temperature": 31.0}]),
             "race_control": pd.DataFrame([{"category": "Flag", "flag": "GREEN"}]),
             "stints": pd.DataFrame([{"driver_number": 1, "stint_number": 1, "compound": "SOFT"}]),
+            "intervals": pd.DataFrame(
+                [{"driver_number": 1, "interval": 0.8, "gap_to_leader": 1.2}]
+            ),
+            "location": pd.DataFrame(
+                [{"driver_number": 1, "date": "2024-04-07T05:00:00Z", "x": 10.0, "y": 20.0}]
+            ),
         }
 
 
@@ -90,6 +98,73 @@ class _FakeOpenMeteoClient:
                     "source": "openmeteo",
                     "dataset_name": "historical_weather",
                 },
+            ]
+        )
+
+
+class _FallbackLocationOpenF1Client(OpenF1Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self._connected = False
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def resolve_session(self, query: SessionQuery) -> dict[str, object]:
+        return {
+            "session_key": 9991,
+            "meeting_key": 2001,
+            "session_name": "Race",
+            "circuit_short_name": "Suzuka",
+        }
+
+    def fetch_lap_data(self, circuit_id: str, session_type: str, year: int) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"driver_number": 1, "lap_number": 1, "lap_duration": 91.0},
+                {"driver_number": 2, "lap_number": 1, "lap_duration": 91.4},
+            ]
+        )
+
+    def fetch_weather(self, session_id: str) -> pd.DataFrame:
+        return pd.DataFrame([{"air_temperature": 24.0, "track_temperature": 32.0}])
+
+    def fetch_race_control(self, session_id: str) -> pd.DataFrame:
+        return pd.DataFrame([{"message": "GREEN FLAG"}])
+
+    def fetch_stints(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def fetch_position(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {"date": "2024-04-07T05:00:00Z", "driver_number": 1, "position": 1},
+                {"date": "2024-04-07T05:00:00Z", "driver_number": 2, "position": 2},
+            ]
+        )
+
+    def fetch_intervals(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame([{"driver_number": 1, "interval": 0.7, "gap_to_leader": 1.1}])
+
+    def fetch_location(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        if driver_id is None:
+            return pd.DataFrame()
+        number = int(driver_id)
+        return pd.DataFrame(
+            [
+                {
+                    "date": "2024-04-07T05:00:00Z",
+                    "driver_number": number,
+                    "x": float(number) * 10.0,
+                    "y": 0.0,
+                    "z": 0.0,
+                }
             ]
         )
 
@@ -141,8 +216,66 @@ def test_unified_data_source_persists_openf1_bundle(tmp_path: Path) -> None:
 
     assert "raw::laps" in persisted
     assert "silver::weather" in persisted
+    assert "silver::intervals" in persisted
+    assert "silver::location" in persisted
     assert Path(persisted["silver::laps"].data_path).exists()
     assert persisted["silver::laps"].metadata["resolved_session"]["session_key"] == 9158
+
+
+def test_standard_pipeline_normalizes_openf1_intervals() -> None:
+    query = SessionQuery(year=2024, track_id="suzuka", session_type="race")
+    frame = pd.DataFrame(
+        [
+            {"driver_number": 1, "interval": 0.8, "gap_to_leader": 1.2},
+            {"driver_number": 2, "interval": "0.9", "gap_to_leader": "+1 LAP"},
+        ]
+    )
+
+    normalized = standard_pipeline(query=query, dataset_name="intervals").run(frame)
+
+    assert float(normalized.loc[0, "interval"]) == 0.8
+    assert pd.isna(normalized.loc[1, "gap_to_leader"])
+    assert "gap_to_leader_raw" in normalized.columns
+    assert normalized.loc[1, "gap_to_leader_raw"] == "+1 LAP"
+
+
+def test_local_datalake_persists_mixed_object_columns(tmp_path: Path) -> None:
+    lake = LocalDataLake(tmp_path / "lake")
+    frame = pd.DataFrame(
+        [
+            {"gap_to_leader": 1.2, "meta": {"flag": "green"}},
+            {"gap_to_leader": "+1 LAP", "meta": {"flag": "blue"}},
+        ]
+    )
+
+    persisted = lake.persist_frame(
+        frame,
+        layer="raw",
+        source="openf1",
+        dataset_name="intervals",
+        partition="year=2024/track=suzuka/session=race",
+    )
+    loaded = lake.load_frame(
+        layer="raw",
+        source="openf1",
+        dataset_name="intervals",
+        partition="year=2024/track=suzuka/session=race",
+    )
+
+    assert Path(persisted.data_path).exists()
+    assert str(loaded.loc[1, "gap_to_leader"]) == "+1 LAP"
+
+
+def test_openf1_bundle_backfills_location_per_driver() -> None:
+    client = _FallbackLocationOpenF1Client()
+    client.connect()
+
+    bundle = client.fetch_session_bundle(
+        SessionQuery(year=2024, track_id="suzuka", session_type="race")
+    )
+
+    assert not bundle["location"].empty
+    assert set(bundle["location"]["driver_number"].tolist()) == {1, 2}
 
 
 def test_build_weather_profile_from_historical_weather(tmp_path: Path) -> None:
@@ -181,8 +314,18 @@ def test_public_session_validator_scores_saved_public_data(tmp_path: Path) -> No
     lake.persist_frame(
         pd.DataFrame(
             [
-                {"air_temperature": 23.0, "track_temperature": 31.0, "wind_speed": 14.0, "rainfall": 0.0},
-                {"air_temperature": 24.0, "track_temperature": 32.0, "wind_speed": 16.0, "rainfall": 0.0},
+                {
+                    "air_temperature": 23.0,
+                    "track_temperature": 31.0,
+                    "wind_speed": 14.0,
+                    "rainfall": 0.0,
+                },
+                {
+                    "air_temperature": 24.0,
+                    "track_temperature": 32.0,
+                    "wind_speed": 16.0,
+                    "rainfall": 0.0,
+                },
             ]
         ),
         layer="silver",
@@ -202,8 +345,14 @@ def test_public_session_validator_scores_saved_public_data(tmp_path: Path) -> No
         "metrics": {"incident_count": 0},
         "physics_resolution_log": [{"lap_time_s": 90.5}, {"lap_time_s": 91.5}],
         "state_snapshots": [
-            {"weather": {"air_temp_c": 23.0, "wind_speed_mps": 4.0, "rain_intensity_mm_h": 0.0}, "track_state": {"track_temp_c": 31.0}},
-            {"weather": {"air_temp_c": 24.0, "wind_speed_mps": 4.5, "rain_intensity_mm_h": 0.0}, "track_state": {"track_temp_c": 32.0}},
+            {
+                "weather": {"air_temp_c": 23.0, "wind_speed_mps": 4.0, "rain_intensity_mm_h": 0.0},
+                "track_state": {"track_temp_c": 31.0},
+            },
+            {
+                "weather": {"air_temp_c": 24.0, "wind_speed_mps": 4.5, "rain_intensity_mm_h": 0.0},
+                "track_state": {"track_temp_c": 32.0},
+            },
         ],
     }
     validator = PublicSessionValidator(data_root=str(tmp_path / "lake"))

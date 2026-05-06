@@ -25,6 +25,9 @@ DEFAULT_BATTLE_PROFILE = {
     "track_limit_scale": 1.0,
 }
 
+MAX_BATTLE_DISTANCE_M = 200.0
+MAX_REASONABLE_CLOSING_DELTA_M = 50.0
+
 
 @dataclass(frozen=True)
 class PrimitiveCalibrationReport:
@@ -72,6 +75,11 @@ class PublicPrimitiveCalibrator:
             car_families=self._car_families,
             track_repository=self._track_repo,
         )
+
+    @staticmethod
+    def _parse_datetime_utc(values: pd.Series) -> pd.Series:
+        """Parse mixed ISO-8601 timestamps from public datasets into UTC datetimes."""
+        return pd.to_datetime(values, utc=True, format="mixed", errors="coerce")
 
     def calibrate_lap(
         self,
@@ -159,9 +167,11 @@ class PublicPrimitiveCalibrator:
         laps_frame = self._load_dataset("laps", query)
         weather = self._load_dataset("weather", query)
         position = self._load_dataset("position", query)
-        race_control = self._load_dataset("race_control", query)
+        intervals = self._load_optional_dataset("intervals", query)
+        location = self._load_optional_dataset("location", query)
+        race_control = self._load_optional_dataset("race_control", query)
         actual_summary = self._summarize_battle_actual(
-            laps_frame, weather, position, race_control, query
+            laps_frame, weather, position, intervals, location, race_control, query
         )
 
         representative_laps = laps or max(
@@ -240,6 +250,12 @@ class PublicPrimitiveCalibrator:
             dataset_name=dataset_name,
             partition=query.partition_key(),
         )
+
+    def _load_optional_dataset(self, dataset_name: str, query: SessionQuery) -> pd.DataFrame:
+        try:
+            return self._load_dataset(dataset_name, query)
+        except FileNotFoundError:
+            return pd.DataFrame()
 
     def _summarize_lap_actual(
         self,
@@ -419,6 +435,8 @@ class PublicPrimitiveCalibrator:
         laps: pd.DataFrame,
         weather: pd.DataFrame,
         position: pd.DataFrame,
+        intervals: pd.DataFrame,
+        location: pd.DataFrame,
         race_control: pd.DataFrame,
         query: SessionQuery,
     ) -> dict[str, Any]:
@@ -430,13 +448,11 @@ class PublicPrimitiveCalibrator:
         if position.empty:
             raise ValueError("No public position data available for battle calibration")
 
-        position["date"] = pd.to_datetime(position["date"], utc=True)
-        position = position.sort_values(["driver_number", "date"]).reset_index(drop=True)
-        diff = position.groupby("driver_number")["position"].diff()
-        change_events = int(diff.fillna(0.0).ne(0.0).sum())
-        gain_events = int((-diff.fillna(0.0).clip(upper=0.0)).sum())
-        driver_count = int(position["driver_number"].nunique())
-        stability_ratio = 1.0 - change_events / max(len(position) - driver_count, 1)
+        position_summary = self._summarize_actual_positions(
+            valid_laps, position, query.driver_numbers
+        )
+        interval_summary = self._summarize_actual_intervals(intervals, query.driver_numbers)
+        spatial_summary = self._summarize_actual_location_density(location, query.driver_numbers)
 
         safety_events = 0
         if "message" in race_control.columns:
@@ -450,7 +466,8 @@ class PublicPrimitiveCalibrator:
             if "st_speed" in valid_laps.columns
             else pd.Series(dtype=float)
         )
-        closing_speed_proxy_kph = (
+        location_closing_speed = spatial_summary["closing_speed_proxy_kph"]
+        closing_speed_proxy_kph = location_closing_speed or (
             float(st_speed.quantile(0.9) - st_speed.quantile(0.5)) if not st_speed.empty else 20.0
         )
         weather_inputs, track_inputs = self._weather_inputs(weather)
@@ -461,15 +478,98 @@ class PublicPrimitiveCalibrator:
         )
         return {
             "lap_count": lap_count,
+            "driver_count": position_summary["driver_count"],
+            "position_change_events": position_summary["position_change_events"],
+            "position_gain_events": position_summary["position_gain_events"],
+            "position_gain_rate_per_lap": position_summary["position_gain_events"]
+            / max(lap_count, 1),
+            "stability_ratio": position_summary["stability_ratio"],
+            "closing_speed_proxy_kph": max(5.0, closing_speed_proxy_kph),
+            "safety_event_rate_per_lap": safety_events / max(lap_count, 1),
+            "close_following_ratio": interval_summary["close_following_ratio"],
+            "attack_window_ratio": interval_summary["attack_window_ratio"],
+            "compressed_field_ratio": interval_summary["compressed_field_ratio"],
+            "mean_interval_s": interval_summary["mean_interval_s"],
+            "tight_spatial_ratio": spatial_summary["tight_spatial_ratio"],
+            "median_min_pair_distance_m": spatial_summary["median_min_pair_distance_m"],
+            "closing_speed_proxy_from_location_kph": location_closing_speed,
+            "weather_inputs": weather_inputs,
+            "track_inputs": track_inputs,
+        }
+
+    def _summarize_actual_positions(
+        self,
+        laps: pd.DataFrame,
+        position: pd.DataFrame,
+        driver_numbers: list[int] | None,
+    ) -> dict[str, float]:
+        frame = position.copy()
+        frame["date"] = self._parse_datetime_utc(frame["date"])
+        frame["position"] = pd.to_numeric(frame["position"], errors="coerce")
+        frame = (
+            frame.dropna(subset=["date", "position"])
+            .sort_values(["driver_number", "date"])
+            .reset_index(drop=True)
+        )
+
+        if {
+            "driver_number",
+            "lap_number",
+            "date_start",
+            "lap_duration",
+        }.issubset(laps.columns):
+            lap_frame = laps.copy()
+            if driver_numbers:
+                lap_frame = lap_frame[lap_frame["driver_number"].isin(driver_numbers)]
+            lap_frame["date_start"] = self._parse_datetime_utc(lap_frame["date_start"])
+            lap_frame = lap_frame.dropna(subset=["date_start"])
+            lap_frame["lap_end"] = lap_frame["date_start"] + pd.to_timedelta(
+                lap_frame["lap_duration"], unit="s"
+            )
+            lap_snapshots: list[pd.DataFrame] = []
+            for driver_number, driver_laps in lap_frame.groupby("driver_number"):
+                driver_position = frame[frame["driver_number"] == driver_number][
+                    ["date", "position"]
+                ].sort_values("date")
+                if driver_position.empty:
+                    continue
+                merged = pd.merge_asof(
+                    driver_laps.sort_values("lap_end"),
+                    driver_position,
+                    left_on="lap_end",
+                    right_on="date",
+                    direction="backward",
+                )
+                lap_snapshots.append(
+                    merged[["driver_number", "lap_number", "position"]].dropna(subset=["position"])
+                )
+            if lap_snapshots:
+                lap_positions = pd.concat(lap_snapshots, ignore_index=True).sort_values(
+                    ["driver_number", "lap_number"]
+                )
+                diff = lap_positions.groupby("driver_number")["position"].diff()
+                change_events = int(diff.fillna(0.0).ne(0.0).sum())
+                gain_events = int((-diff.fillna(0.0).clip(upper=0.0)).sum())
+                total_transitions = int(diff.notna().sum())
+                driver_count = int(lap_positions["driver_number"].nunique())
+                stability_ratio = 1.0 - change_events / max(total_transitions, 1)
+                return {
+                    "driver_count": driver_count,
+                    "position_change_events": change_events,
+                    "position_gain_events": gain_events,
+                    "stability_ratio": max(0.0, min(1.0, stability_ratio)),
+                }
+
+        diff = frame.groupby("driver_number")["position"].diff()
+        change_events = int(diff.fillna(0.0).ne(0.0).sum())
+        gain_events = int((-diff.fillna(0.0).clip(upper=0.0)).sum())
+        driver_count = int(frame["driver_number"].nunique())
+        stability_ratio = 1.0 - change_events / max(len(frame) - driver_count, 1)
+        return {
             "driver_count": driver_count,
             "position_change_events": change_events,
             "position_gain_events": gain_events,
-            "position_gain_rate_per_lap": gain_events / max(lap_count, 1),
             "stability_ratio": max(0.0, min(1.0, stability_ratio)),
-            "closing_speed_proxy_kph": max(5.0, closing_speed_proxy_kph),
-            "safety_event_rate_per_lap": safety_events / max(lap_count, 1),
-            "weather_inputs": weather_inputs,
-            "track_inputs": track_inputs,
         }
 
     def _summarize_battle_simulated(self, run_output: dict[str, Any]) -> dict[str, Any]:
@@ -477,6 +577,11 @@ class PublicPrimitiveCalibrator:
         snapshots = run_output.get("state_snapshots", [])
         position_changes = 0
         total_transitions = 0
+        gap_samples: list[float] = []
+        close_following_count = 0
+        attack_window_count = 0
+        compressed_field_count = 0
+        car_samples = 0
         for previous, current in pairwise(snapshots):
             prev_positions = {
                 car["car_id"]: car["position"]
@@ -493,6 +598,19 @@ class PublicPrimitiveCalibrator:
                 prev_positions[car_id] != current_positions[car_id] for car_id in shared
             )
             total_transitions += len(shared)
+            for car in current.get("cars", []):
+                if car.get("retired", False):
+                    continue
+                car_samples += 1
+                if int(car.get("position", 99)) > 1:
+                    gap_ahead = float(car.get("gap_ahead_s", 999.0))
+                    gap_samples.append(gap_ahead)
+                    if 0.0 < gap_ahead <= 1.5:
+                        close_following_count += 1
+                    if 0.0 < gap_ahead <= 1.0:
+                        attack_window_count += 1
+                if float(car.get("gap_to_leader_s", 999.0)) <= 5.0:
+                    compressed_field_count += 1
         stability_ratio = 1.0 - position_changes / max(total_transitions, 1)
         metrics = run_output.get("metrics", {})
         return {
@@ -501,6 +619,11 @@ class PublicPrimitiveCalibrator:
             "track_limit_rate_per_lap": metrics.get("track_limit_breaches", 0) / laps,
             "closing_speed_proxy_kph": float(metrics.get("avg_closing_speed_kph", 0.0)),
             "stability_ratio": max(0.0, min(1.0, stability_ratio)),
+            "close_following_ratio": close_following_count / max(len(gap_samples), 1),
+            "attack_window_ratio": attack_window_count / max(len(gap_samples), 1),
+            "compressed_field_ratio": compressed_field_count / max(car_samples, 1),
+            "mean_interval_s": sum(gap_samples) / max(len(gap_samples), 1),
+            "tight_spatial_ratio": attack_window_count / max(len(gap_samples), 1),
         }
 
     def _battle_errors(
@@ -514,6 +637,23 @@ class PublicPrimitiveCalibrator:
                 - actual_summary["position_gain_rate_per_lap"]
             )
             / max(actual_summary["position_gain_rate_per_lap"], 0.25),
+            "mean_interval_error": abs(
+                simulated_summary["mean_interval_s"] - actual_summary["mean_interval_s"]
+            )
+            / max(actual_summary["mean_interval_s"], 0.25),
+            "close_following_error": abs(
+                simulated_summary["close_following_ratio"] - actual_summary["close_following_ratio"]
+            ),
+            "attack_window_error": abs(
+                simulated_summary["attack_window_ratio"] - actual_summary["attack_window_ratio"]
+            ),
+            "compressed_field_error": abs(
+                simulated_summary["compressed_field_ratio"]
+                - actual_summary["compressed_field_ratio"]
+            ),
+            "tight_spatial_error": abs(
+                simulated_summary["tight_spatial_ratio"] - actual_summary["tight_spatial_ratio"]
+            ),
             "closing_speed_error": abs(
                 simulated_summary["closing_speed_proxy_kph"]
                 - actual_summary["closing_speed_proxy_kph"]
@@ -531,10 +671,15 @@ class PublicPrimitiveCalibrator:
 
     def _battle_score(self, errors: dict[str, float]) -> float:
         return (
-            errors["overtake_rate_error"] * 0.4
-            + errors["closing_speed_error"] * 0.25
-            + errors["incident_rate_error"] * 0.2
-            + errors["stability_error"] * 0.15
+            errors["mean_interval_error"] * 0.22
+            + errors["close_following_error"] * 0.18
+            + errors["attack_window_error"] * 0.14
+            + errors["compressed_field_error"] * 0.12
+            + errors["tight_spatial_error"] * 0.1
+            + errors["overtake_rate_error"] * 0.12
+            + errors["closing_speed_error"] * 0.08
+            + errors["incident_rate_error"] * 0.05
+            + errors["stability_error"] * 0.05
         )
 
     def _valid_laps(self, laps: pd.DataFrame, driver_numbers: list[int] | None) -> pd.DataFrame:
@@ -594,6 +739,134 @@ class PublicPrimitiveCalibrator:
                 "rubber_level": 0.35,
             },
         )
+
+    def _summarize_actual_intervals(
+        self,
+        intervals: pd.DataFrame,
+        driver_numbers: list[int] | None,
+    ) -> dict[str, float]:
+        if intervals.empty:
+            return {
+                "close_following_ratio": 0.0,
+                "attack_window_ratio": 0.0,
+                "compressed_field_ratio": 0.0,
+                "mean_interval_s": 5.0,
+            }
+        frame = intervals.copy()
+        if driver_numbers:
+            frame = frame[frame["driver_number"].isin(driver_numbers)]
+        valid_interval = pd.to_numeric(frame.get("interval"), errors="coerce")
+        valid_gap = pd.to_numeric(frame.get("gap_to_leader"), errors="coerce")
+        battle_samples = valid_interval[(valid_interval > 0.0) & valid_interval.notna()]
+        gap_samples = valid_gap[(valid_gap >= 0.0) & valid_gap.notna()]
+        if battle_samples.empty:
+            mean_interval_s = 5.0
+            close_ratio = 0.0
+            attack_ratio = 0.0
+        else:
+            mean_interval_s = float(battle_samples.mean())
+            close_ratio = float((battle_samples <= 1.5).mean())
+            attack_ratio = float((battle_samples <= 1.0).mean())
+        compressed_ratio = float((gap_samples <= 5.0).mean()) if not gap_samples.empty else 0.0
+        return {
+            "close_following_ratio": close_ratio,
+            "attack_window_ratio": attack_ratio,
+            "compressed_field_ratio": compressed_ratio,
+            "mean_interval_s": mean_interval_s,
+        }
+
+    def _summarize_actual_location_density(
+        self,
+        location: pd.DataFrame,
+        driver_numbers: list[int] | None,
+    ) -> dict[str, float]:
+        if location.empty or not {"date", "x", "y", "driver_number"}.issubset(location.columns):
+            return {
+                "tight_spatial_ratio": 0.0,
+                "median_min_pair_distance_m": 120.0,
+                "closing_speed_proxy_kph": 0.0,
+            }
+        frame = location.copy()
+        if driver_numbers:
+            frame = frame[frame["driver_number"].isin(driver_numbers)]
+        if frame.empty:
+            return {
+                "tight_spatial_ratio": 0.0,
+                "median_min_pair_distance_m": 120.0,
+                "closing_speed_proxy_kph": 0.0,
+            }
+        frame["date"] = self._parse_datetime_utc(frame["date"])
+        frame = frame.dropna(subset=["date", "x", "y"])
+        if frame.empty:
+            return {
+                "tight_spatial_ratio": 0.0,
+                "median_min_pair_distance_m": 120.0,
+                "closing_speed_proxy_kph": 0.0,
+            }
+        frame["date"] = frame["date"].dt.floor("2s")
+        grouped = (
+            frame.groupby(["date", "driver_number"], as_index=False)[["x", "y"]]
+            .mean()
+            .sort_values(["date", "driver_number"])
+        )
+        min_distances: list[float] = []
+        nearest_by_driver: dict[int, list[tuple[pd.Timestamp, float]]] = {}
+        for _, bucket in grouped.groupby("date"):
+            coords = bucket[["x", "y"]].to_numpy(dtype=float)
+            driver_ids = bucket["driver_number"].to_numpy(dtype=int)
+            if len(coords) < 2:
+                continue
+            best = float("inf")
+            best_per_driver = [float("inf")] * len(coords)
+            for index in range(len(coords)):
+                deltas = coords[index + 1 :] - coords[index]
+                if len(deltas) == 0:
+                    continue
+                distances = (deltas[:, 0] ** 2 + deltas[:, 1] ** 2) ** 0.5
+                candidate = float(distances.min())
+                if candidate < best:
+                    best = candidate
+                for offset, distance in enumerate(distances, start=index + 1):
+                    scalar_distance = float(distance)
+                    if scalar_distance < best_per_driver[index]:
+                        best_per_driver[index] = scalar_distance
+                    if scalar_distance < best_per_driver[offset]:
+                        best_per_driver[offset] = scalar_distance
+            if best < float("inf"):
+                min_distances.append(best)
+            timestamp = bucket["date"].iloc[0]
+            for driver_id, best_distance in zip(driver_ids, best_per_driver, strict=True):
+                if best_distance < float("inf"):
+                    nearest_by_driver.setdefault(int(driver_id), []).append(
+                        (timestamp, best_distance)
+                    )
+        if not min_distances:
+            return {
+                "tight_spatial_ratio": 0.0,
+                "median_min_pair_distance_m": 120.0,
+                "closing_speed_proxy_kph": 0.0,
+            }
+        series = pd.Series(min_distances, dtype=float)
+        closing_rates: list[float] = []
+        for samples in nearest_by_driver.values():
+            for (time_a, distance_a), (time_b, distance_b) in pairwise(samples):
+                delta_t = max((time_b - time_a).total_seconds(), 1e-6)
+                delta_distance = distance_a - distance_b
+                # Nearest-opponent identity can switch between samples.
+                # Keep only local battle compression that stays within plausible ranges.
+                if (
+                    0.0 < delta_distance <= MAX_REASONABLE_CLOSING_DELTA_M
+                    and distance_a <= MAX_BATTLE_DISTANCE_M
+                    and distance_b <= MAX_BATTLE_DISTANCE_M
+                ):
+                    closing_rates.append((delta_distance / delta_t) * 3.6)
+        return {
+            "tight_spatial_ratio": float((series <= 80.0).mean()),
+            "median_min_pair_distance_m": float(series.median()),
+            "closing_speed_proxy_kph": float(pd.Series(closing_rates, dtype=float).quantile(0.9))
+            if closing_rates
+            else 0.0,
+        }
 
     def _persist_report(
         self,

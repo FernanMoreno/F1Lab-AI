@@ -673,6 +673,17 @@ class SimulationFacade(Protocol):
         """Build and persist one track YAML seed from geospatial inputs."""
         ...
 
+    def build_track_pack(
+        self,
+        *,
+        track_ids: list[str] | None = None,
+        output_dir: str | Path = "outputs/generated_tracks",
+        source_kind: str = "osm",
+        fidelity_level: int = 2,
+    ) -> dict[str, Any]:
+        """Generate enriched YAML seeds for the configured track pack."""
+        ...
+
     def calibrate_public_lap(
         self,
         *,

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import timedelta
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
@@ -41,9 +43,10 @@ class OpenF1Client:
 
     BASE_URL = "https://api.openf1.org/v1"
 
-    def __init__(self, timeout_s: int = 30):
+    def __init__(self, timeout_s: int = 30, max_retries: int = 3):
         self._connected = False
         self._timeout_s = timeout_s
+        self._max_retries = max_retries
 
     @property
     def connected(self) -> bool:
@@ -170,6 +173,22 @@ class OpenF1Client:
             params["driver_number"] = int(driver_id)
         return self._frame(self._get_json("position", params), "position")
 
+    def fetch_location(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        """Fetch x/y/z location trace for one session and optional driver."""
+        self._ensure_connected()
+        params: dict[str, Any] = {"session_key": int(session_id)}
+        if driver_id is not None:
+            params["driver_number"] = int(driver_id)
+        return self._frame(self._get_json("location", params), "location")
+
+    def fetch_intervals(self, session_id: str, driver_id: str | None = None) -> pd.DataFrame:
+        """Fetch interval and gap-to-leader traces for one session and optional driver."""
+        self._ensure_connected()
+        params: dict[str, Any] = {"session_key": int(session_id)}
+        if driver_id is not None:
+            params["driver_number"] = int(driver_id)
+        return self._frame(self._get_json("intervals", params), "intervals")
+
     def fetch_race_control(self, session_id: str) -> pd.DataFrame:
         """Fetch race-control messages for one session."""
         self._ensure_connected()
@@ -181,17 +200,27 @@ class OpenF1Client:
         """Fetch session metadata, laps, weather and control messages in one call."""
         session = self.resolve_session(query)
         session_key = str(int(session["session_key"]))
+        laps = self.fetch_lap_data(query.track_id, query.session_type, query.year)
+        driver_numbers = query.driver_numbers or self._driver_numbers_from_laps(laps)
+        location = self._safe_frame(lambda: self.fetch_location(session_key))
+        if location.empty and driver_numbers:
+            location = self._fetch_per_driver_dataset(
+                driver_numbers=driver_numbers,
+                fetcher=lambda driver_number: self.fetch_location(session_key, str(driver_number)),
+            )
         bundle = {
             "sessions": pd.DataFrame([session]),
-            "laps": self.fetch_lap_data(query.track_id, query.session_type, query.year),
+            "laps": laps,
             "weather": self.fetch_weather(session_key),
-            "race_control": self.fetch_race_control(session_key),
-            "stints": self.fetch_stints(session_key),
-            "position": self.fetch_position(session_key),
+            "race_control": self._safe_frame(lambda: self.fetch_race_control(session_key)),
+            "stints": self._safe_frame(lambda: self.fetch_stints(session_key)),
+            "position": self._safe_frame(lambda: self.fetch_position(session_key)),
+            "intervals": self._safe_frame(lambda: self.fetch_intervals(session_key)),
+            "location": location,
         }
-        if query.driver_numbers:
+        if driver_numbers:
             telemetry_frames = []
-            for driver_number in query.driver_numbers:
+            for driver_number in driver_numbers:
                 try:
                     telemetry_frames.append(self.fetch_telemetry(str(driver_number), session_key))
                 except FetchError:
@@ -210,11 +239,26 @@ class OpenF1Client:
     def _get_json(self, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         query = urlencode(params)
         url = f"{self.BASE_URL}/{endpoint}?{query}"
-        try:
-            with urlopen(url, timeout=self._timeout_s) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except Exception as exc:  # pragma: no cover - network failure path
-            raise FetchError(f"OpenF1 request failed for {url}: {exc}") from exc
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries):
+            try:
+                with urlopen(url, timeout=self._timeout_s) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:  # pragma: no cover - network failure path
+                last_error = exc
+                if exc.code == 429 and attempt < self._max_retries - 1:
+                    retry_after = exc.headers.get("Retry-After")
+                    delay_s = float(retry_after) if retry_after else 1.5 * (attempt + 1)
+                    time.sleep(delay_s)
+                    continue
+                raise FetchError(f"OpenF1 request failed for {url}: {exc}") from exc
+            except Exception as exc:  # pragma: no cover - network failure path
+                last_error = exc
+                if attempt < self._max_retries - 1:
+                    time.sleep(0.75 * (attempt + 1))
+                    continue
+                raise FetchError(f"OpenF1 request failed for {url}: {exc}") from exc
+        raise FetchError(f"OpenF1 request failed for {url}: {last_error}")
 
     def _frame(self, payload: list[dict[str, Any]], dataset_name: str) -> pd.DataFrame:
         frame = pd.DataFrame(payload)
@@ -239,3 +283,37 @@ class OpenF1Client:
                 chars.append("_")
             chars.append(char.lower() if char.isalnum() else "_")
         return "".join(chars).replace("__", "_").strip("_")
+
+    def _safe_frame(self, fetcher: Any) -> pd.DataFrame:
+        try:
+            return fetcher()
+        except FetchError:
+            return pd.DataFrame()
+
+    def _fetch_per_driver_dataset(
+        self,
+        *,
+        driver_numbers: list[int],
+        fetcher: Any,
+    ) -> pd.DataFrame:
+        frames: list[pd.DataFrame] = []
+        for driver_number in driver_numbers:
+            try:
+                frame = fetcher(driver_number)
+            except FetchError:
+                continue
+            if not frame.empty:
+                frames.append(frame)
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    def _driver_numbers_from_laps(self, laps: pd.DataFrame) -> list[int]:
+        if "driver_number" not in laps.columns or laps.empty:
+            return []
+        values = (
+            pd.to_numeric(laps["driver_number"], errors="coerce")
+            .dropna()
+            .astype(int)
+            .drop_duplicates()
+            .tolist()
+        )
+        return sorted(values)

@@ -17,6 +17,7 @@ class OpenMeteoClient:
     """Client for Open-Meteo historical weather API."""
 
     BASE_URL = "https://archive-api.open-meteo.com/v1/archive"
+    ELEVATION_URL = "https://api.open-meteo.com/v1/elevation"
 
     def __init__(self, timeout_s: int = 30):
         self._connected = False
@@ -90,3 +91,33 @@ class OpenMeteoClient:
             }
         )
 
+    def fetch_elevation_profile(
+        self,
+        *,
+        coordinates: list[tuple[float, float]],
+        chunk_size: int = 64,
+    ) -> list[float]:
+        """Fetch terrain elevation for a sequence of latitude/longitude points."""
+        if not self._connected:
+            raise ConnectionError("Client not connected")
+        if not coordinates:
+            return []
+
+        elevations: list[float] = []
+        for start in range(0, len(coordinates), chunk_size):
+            chunk = coordinates[start : start + chunk_size]
+            params = {
+                "latitude": ",".join(f"{lat:.7f}" for lat, _ in chunk),
+                "longitude": ",".join(f"{lon:.7f}" for _, lon in chunk),
+            }
+            url = f"{self.ELEVATION_URL}?{urlencode(params)}"
+            try:
+                with urlopen(url, timeout=self._timeout_s) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except Exception as exc:  # pragma: no cover - network failure path
+                raise FetchError(f"Open-Meteo elevation request failed for {url}: {exc}") from exc
+            chunk_values = payload.get("elevation", [])
+            if len(chunk_values) != len(chunk):
+                raise FetchError("Open-Meteo elevation response length mismatch")
+            elevations.extend(float(value) for value in chunk_values)
+        return elevations

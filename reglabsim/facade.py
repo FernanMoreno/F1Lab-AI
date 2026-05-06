@@ -162,7 +162,9 @@ class SimulationFacadeImpl:
         return self._openmeteo_client
 
     def _track_builder(self) -> GeospatialTrackBuilder:
-        return GeospatialTrackBuilder(self._config_dir / "tracks")
+        return GeospatialTrackBuilder(
+            self._config_dir / "tracks", weather_client=self._weather_source()
+        )
 
     def _primitive_calibrator(self, data_root: str = "data") -> PublicPrimitiveCalibrator:
         self._ensure_regulations_loaded()
@@ -379,6 +381,8 @@ class SimulationFacadeImpl:
             "country": country,
             "avg_speed_kph": avg_speed_kph,
         }
+        if race_distance_m is not None and laps not in (None, 0):
+            metadata["target_length_m"] = race_distance_m / float(laps)
         if latitude is not None:
             metadata["latitude"] = latitude
         if longitude is not None:
@@ -450,6 +454,99 @@ class SimulationFacadeImpl:
             "track_id": track_id,
             "saved_path": str(saved_path),
             "summary": summary,
+        }
+
+    def build_track_pack(
+        self,
+        *,
+        track_ids: list[str] | None = None,
+        output_dir: str | Path = "outputs/generated_tracks",
+        source_kind: str = "osm",
+        fidelity_level: int = 2,
+    ) -> dict[str, Any]:
+        """Generate enriched seeds for the configured track pack."""
+        targets = track_ids or self.list_circuits()
+        output_root = Path(output_dir)
+        output_root.mkdir(parents=True, exist_ok=True)
+        results: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for track_id in targets:
+            track = self._track_repo.get(track_id)
+            if source_kind != "osm":
+                raise ValueError("Track pack generation currently supports source_kind='osm' only")
+            latitude = float(track.metadata.get("latitude"))
+            longitude = float(track.metadata.get("longitude"))
+            try:
+                result = self.build_track_seed(
+                    track_id=track_id,
+                    name=track.name,
+                    country=track.country,
+                    source_kind="osm",
+                    latitude=latitude,
+                    longitude=longitude,
+                    turns=track.turns,
+                    laps=track.laps,
+                    race_distance_m=track.race_distance_m,
+                    avg_speed_kph=track.avg_speed_kph,
+                    fidelity_level=fidelity_level,
+                    output_path=output_root / f"{track_id}.yaml",
+                    sources=["osm_raceway", "openmeteo_elevation", "generated_seed"],
+                )
+                coverage_ratio = result["summary"]["metadata"].get("length_coverage_ratio")
+                if coverage_ratio is not None and float(coverage_ratio) < 0.5:
+                    fallback_payload = self._track_builder().build_from_track_model(
+                        track,
+                        fallback_reason=f"OSM coverage ratio {coverage_ratio:.3f} below threshold.",
+                    )
+                    fallback_path = self._track_builder().save_yaml(
+                        fallback_payload,
+                        output_root / f"{track_id}.yaml",
+                    )
+                    results.append(
+                        {
+                            "track_id": track_id,
+                            "saved_path": str(fallback_path),
+                            "summary": {
+                                "track_id": fallback_payload["track_id"],
+                                "name": fallback_payload["name"],
+                                "country": fallback_payload["country"],
+                                "length_m": fallback_payload["length_m"],
+                                "turns": fallback_payload["turns"],
+                                "fidelity_level": fallback_payload["fidelity_level"],
+                                "sources": fallback_payload["sources"],
+                                "validation_status": fallback_payload["validation_status"],
+                                "fidelity_notes": fallback_payload["fidelity_notes"],
+                                "metadata": fallback_payload["metadata"],
+                                "segments": [
+                                    segment["id"] for segment in fallback_payload["segments"]
+                                ],
+                            },
+                            "fallback_used": True,
+                        }
+                    )
+                    failures.append(
+                        {
+                            "track_id": track_id,
+                            "error": f"Low OSM coverage ratio {coverage_ratio:.3f}",
+                            "saved_path": result["saved_path"],
+                            "fallback_saved_path": str(fallback_path),
+                        }
+                    )
+                else:
+                    results.append(result)
+            except Exception as exc:
+                failures.append(
+                    {
+                        "track_id": track_id,
+                        "error": str(exc),
+                    }
+                )
+        return {
+            "output_dir": str(output_root),
+            "track_count": len(results),
+            "failure_count": len(failures),
+            "tracks": results,
+            "failures": failures,
         }
 
     def calibrate_public_lap(

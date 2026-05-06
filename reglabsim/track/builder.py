@@ -3,12 +3,39 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
+import time
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import yaml
+
+from reglabsim.data.openmeteo_client import OpenMeteoClient
+from reglabsim.track.geometry import TrackModel
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+STREET_HIGHWAY_PATTERN = (
+    "motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service"
+)
+STREET_HIGHWAY_PRIORITY = {
+    "motorway": 0.0,
+    "trunk": 0.05,
+    "primary": 0.1,
+    "secondary": 0.15,
+    "tertiary": 0.2,
+    "unclassified": 0.3,
+    "residential": 0.35,
+    "living_street": 0.4,
+    "service": 0.55,
+}
+MAX_STREET_COMPONENT_WAYS = 120
+STREET_NODE_THRESHOLD_M = 20.0
+STREET_CONNECT_THRESHOLD_M = 25.0
 
 
 @dataclass(frozen=True)
@@ -55,11 +82,26 @@ class BuiltSegment:
         return data
 
 
+@dataclass(frozen=True)
+class OSMWay:
+    """One OSM raceway polyline plus tags and precomputed length."""
+
+    way_id: int
+    points: list[TrackPoint]
+    tags: dict[str, Any]
+    length_m: float
+
+
 class GeospatialTrackBuilder:
     """Build track YAML from local geospatial seeds or optional OSM fetches."""
 
-    def __init__(self, tracks_dir: str | Path = "configs/tracks"):
+    def __init__(
+        self,
+        tracks_dir: str | Path = "configs/tracks",
+        weather_client: OpenMeteoClient | None = None,
+    ):
         self._tracks_dir = Path(tracks_dir)
+        self._weather_client = weather_client
 
     def build_from_existing_seed(
         self,
@@ -74,13 +116,29 @@ class GeospatialTrackBuilder:
         sources: list[str] | None = None,
         validation_status: str = "generated_seed",
         fidelity_notes: list[str] | None = None,
+        enrich_elevation: bool = False,
     ) -> dict[str, Any]:
         """Build a track YAML payload from an explicit centerline."""
         if len(centerline) < 3:
             raise ValueError("Centerline requires at least 3 points")
+        centerline = self._prepare_centerline(centerline, enrich_elevation=enrich_elevation)
         cumulative = self._cumulative_distances(centerline)
         total_length_m = cumulative[-1]
         segments = self._segment_centerline(track_id, centerline, cumulative)
+        elevations = [point.elevation_m for point in centerline if point.elevation_m is not None]
+        target_length_m = self._expected_length_from_metadata(metadata)
+        coverage_ratio = (
+            round(total_length_m / target_length_m, 4)
+            if target_length_m is not None and target_length_m > 0.0
+            else None
+        )
+        effective_validation_status = validation_status
+        effective_notes = list(fidelity_notes or ["Generated from centerline heuristics."])
+        if coverage_ratio is not None and coverage_ratio < 0.5:
+            effective_validation_status = "generated_seed_low_coverage"
+            effective_notes.append(
+                f"Centerline coverage ratio {coverage_ratio:.3f} below target length."
+            )
         return {
             "track_id": track_id,
             "name": metadata["name"],
@@ -98,12 +156,18 @@ class GeospatialTrackBuilder:
             "avg_speed_kph": float(metadata.get("avg_speed_kph", 200.0)),
             "fidelity_level": fidelity_level,
             "sources": list(sources or ["local_centerline_seed"]),
-            "validation_status": validation_status,
-            "fidelity_notes": list(fidelity_notes or ["Generated from centerline heuristics."]),
+            "validation_status": effective_validation_status,
+            "fidelity_notes": effective_notes,
             "metadata": {
                 **metadata,
                 "builder": "geospatial_track_builder.v1",
                 "centerline_points": len(centerline),
+                "elevation_source": "openmeteo_elevation"
+                if enrich_elevation
+                else metadata.get("elevation_source"),
+                "elevation_min_m": min(elevations) if elevations else None,
+                "elevation_max_m": max(elevations) if elevations else None,
+                "length_coverage_ratio": coverage_ratio,
             },
             "segments": segments,
         }
@@ -147,31 +211,115 @@ class GeospatialTrackBuilder:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Fetch a raceway centerline via OSMnx and build a track YAML seed."""
+        expected_length_m = self._expected_length_from_metadata(metadata)
         try:
             import osmnx as ox  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency path
-            raise RuntimeError(
-                "OSMnx is not installed. Install optional dependency group 'geo' to build from OSM."
-            ) from exc
 
-        tags = {"highway": "raceway"}
-        north = latitude + search_radius_m / 111_000.0
-        south = latitude - search_radius_m / 111_000.0
-        east = longitude + search_radius_m / 85_000.0
-        west = longitude - search_radius_m / 85_000.0
-        features = ox.features_from_bbox((north, south, east, west), tags=tags)
-        if features.empty:
-            raise ValueError(f"No OSM raceway features found near {track_id}")
-        geometry = features.iloc[0].geometry
-        coords = list(geometry.coords) if hasattr(geometry, "coords") else []
-        if len(coords) < 3:
-            raise ValueError(f"OSM geometry for {track_id} does not contain enough points")
-        points = [TrackPoint(latitude=lat, longitude=lon) for lon, lat in coords]
+            tags = {"highway": "raceway"}
+            north = latitude + search_radius_m / 111_000.0
+            south = latitude - search_radius_m / 111_000.0
+            east = longitude + search_radius_m / 85_000.0
+            west = longitude - search_radius_m / 85_000.0
+            features = ox.features_from_bbox((north, south, east, west), tags=tags)
+            if features.empty:
+                raise ValueError(f"No OSM raceway features found near {track_id}")
+            geometry = features.iloc[0].geometry
+            coords = list(geometry.coords) if hasattr(geometry, "coords") else []
+            if len(coords) < 3:
+                raise ValueError(f"OSM geometry for {track_id} does not contain enough points")
+            points = [TrackPoint(latitude=lat, longitude=lon) for lon, lat in coords]
+            osm_metadata = {"osm_source": "osmnx", "osm_feature_count": len(features)}
+        except ImportError:
+            points, osm_metadata = self._fetch_osm_points_overpass(
+                latitude=latitude,
+                longitude=longitude,
+                search_radius_m=search_radius_m,
+                expected_length_m=expected_length_m,
+            )
         return self.build_from_existing_seed(
             track_id=track_id,
-            metadata=metadata,
+            metadata={**metadata, **osm_metadata},
             centerline=points,
-            sources=["osm_raceway", "generated_seed"],
+            sources=["osm_raceway", "generated_seed", "openmeteo_elevation"],
+            enrich_elevation=True,
+            **kwargs,
+        )
+
+    def build_from_osm_street(
+        self,
+        *,
+        track_id: str,
+        metadata: dict[str, Any],
+        latitude: float,
+        longitude: float,
+        search_radius_m: int = 1600,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Fetch a street-network centerline via Overpass and build a track YAML seed."""
+        expected_length_m = self._expected_length_from_metadata(metadata)
+        points, osm_metadata = self._fetch_osm_points_overpass(
+            latitude=latitude,
+            longitude=longitude,
+            search_radius_m=search_radius_m,
+            expected_length_m=expected_length_m,
+            street_mode=True,
+        )
+        return self.build_from_existing_seed(
+            track_id=track_id,
+            metadata={**metadata, **osm_metadata},
+            centerline=points,
+            sources=["osm_street_network", "generated_seed", "openmeteo_elevation"],
+            enrich_elevation=True,
+            **kwargs,
+        )
+
+    def build_from_overpass_payload(
+        self,
+        *,
+        track_id: str,
+        metadata: dict[str, Any],
+        payload: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build a track seed from a raw Overpass JSON payload."""
+        points, osm_metadata = self._points_from_overpass_payload(
+            payload,
+            expected_length_m=self._expected_length_from_metadata(metadata),
+        )
+        return self.build_from_existing_seed(
+            track_id=track_id,
+            metadata={**metadata, **osm_metadata},
+            centerline=points,
+            sources=["osm_overpass_payload", "generated_seed", "openmeteo_elevation"],
+            enrich_elevation=True,
+            **kwargs,
+        )
+
+    def build_from_street_overpass_payload(
+        self,
+        *,
+        track_id: str,
+        metadata: dict[str, Any],
+        payload: dict[str, Any],
+        latitude: float,
+        longitude: float,
+        search_radius_m: int = 1600,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build a street-circuit seed from raw Overpass JSON road payload."""
+        points, osm_metadata = self._points_from_street_overpass_payload(
+            payload,
+            expected_length_m=self._expected_length_from_metadata(metadata),
+            center_latitude=latitude,
+            center_longitude=longitude,
+            search_radius_m=search_radius_m,
+        )
+        return self.build_from_existing_seed(
+            track_id=track_id,
+            metadata={**metadata, **osm_metadata},
+            centerline=points,
+            sources=["osm_street_network", "generated_seed", "openmeteo_elevation"],
+            enrich_elevation=True,
             **kwargs,
         )
 
@@ -186,6 +334,38 @@ class GeospatialTrackBuilder:
         with open(target, "w", encoding="utf-8") as handle:
             yaml.safe_dump(track_payload, handle, sort_keys=False)
         return target
+
+    def build_from_track_model(
+        self,
+        track: TrackModel,
+        *,
+        validation_status: str = "fallback_curated_track_model",
+        fallback_reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Export an existing curated track model as a builder payload fallback."""
+        metadata = dict(track.metadata)
+        metadata["builder"] = "geospatial_track_builder.curated_fallback.v1"
+        if fallback_reason:
+            metadata["fallback_reason"] = fallback_reason
+        notes = list(track.fidelity_notes)
+        if fallback_reason:
+            notes.append(fallback_reason)
+        return {
+            "track_id": track.track_id,
+            "name": track.name,
+            "country": track.country,
+            "length_m": round(track.length_m, 3),
+            "turns": track.turns,
+            "laps": track.laps,
+            "race_distance_m": round(track.race_distance_m, 3),
+            "avg_speed_kph": round(track.avg_speed_kph, 3),
+            "fidelity_level": track.fidelity_level,
+            "sources": list(dict.fromkeys([*track.sources, "curated_track_model_fallback"])),
+            "validation_status": validation_status,
+            "fidelity_notes": notes,
+            "metadata": metadata,
+            "segments": [self._segment_to_payload(segment) for segment in track.segments],
+        }
 
     def _load_csv_points(self, csv_path: str | Path) -> list[TrackPoint]:
         points: list[TrackPoint] = []
@@ -235,6 +415,32 @@ class GeospatialTrackBuilder:
                 )
             )
         return points
+
+    def _prepare_centerline(
+        self,
+        centerline: list[TrackPoint],
+        *,
+        enrich_elevation: bool,
+    ) -> list[TrackPoint]:
+        if not enrich_elevation:
+            return centerline
+        if any(point.latitude is None or point.longitude is None for point in centerline):
+            return centerline
+        if all(point.elevation_m is not None for point in centerline):
+            return centerline
+        coordinates = [(float(point.latitude), float(point.longitude)) for point in centerline]
+        elevations = self._elevation_client().fetch_elevation_profile(coordinates=coordinates)
+        return [
+            TrackPoint(
+                latitude=point.latitude,
+                longitude=point.longitude,
+                x_m=point.x_m,
+                y_m=point.y_m,
+                elevation_m=elevation if point.elevation_m is None else point.elevation_m,
+                width_m=point.width_m,
+            )
+            for point, elevation in zip(centerline, elevations, strict=True)
+        ]
 
     def _cumulative_distances(self, points: list[TrackPoint]) -> list[float]:
         cumulative = [0.0]
@@ -454,3 +660,542 @@ class GeospatialTrackBuilder:
                 continue
             return float(value)
         return None
+
+    def _elevation_client(self) -> OpenMeteoClient:
+        if self._weather_client is None:
+            self._weather_client = OpenMeteoClient()
+            self._weather_client.connect()
+        return self._weather_client
+
+    def _fetch_osm_points_overpass(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        search_radius_m: int,
+        expected_length_m: float | None,
+        street_mode: bool = False,
+    ) -> tuple[list[TrackPoint], dict[str, Any]]:
+        query = (
+            f"[out:json][timeout:25];("
+            + (
+                f'way["highway"~"{STREET_HIGHWAY_PATTERN}"](around:{search_radius_m},{latitude},{longitude});'
+                if street_mode
+                else (
+                    f'way["highway"="raceway"](around:{search_radius_m},{latitude},{longitude});'
+                    f'relation["highway"="raceway"](around:{search_radius_m},{latitude},{longitude});'
+                )
+            )
+            + ");out geom tags;"
+        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            request = Request(
+                OVERPASS_URL,
+                data=query.encode("utf-8"),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "f1lab-ai/0.2",
+                },
+            )
+            try:
+                with urlopen(request, timeout=60) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                if street_mode:
+                    return self._points_from_street_overpass_payload(
+                        payload,
+                        expected_length_m=expected_length_m,
+                        center_latitude=latitude,
+                        center_longitude=longitude,
+                        search_radius_m=search_radius_m,
+                    )
+                return self._points_from_overpass_payload(payload, expected_length_m=expected_length_m)
+            except (HTTPError, URLError, TimeoutError) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise ValueError(
+                    f"Overpass fetch failed near lat={latitude} lon={longitude}: {exc}"
+                ) from exc
+        raise ValueError(f"Overpass fetch failed near lat={latitude} lon={longitude}: {last_error}")
+
+    def _points_from_overpass_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_length_m: float | None,
+    ) -> tuple[list[TrackPoint], dict[str, Any]]:
+        elements = payload.get("elements", [])
+        if not elements:
+            raise ValueError("Overpass payload does not contain raceway elements")
+        ways = [
+            element
+            for element in elements
+            if element.get("type") == "way" and element.get("geometry")
+        ]
+        if not ways:
+            raise ValueError("Overpass payload does not contain usable way geometries")
+        way_entries: list[OSMWay] = []
+        widths: list[float] = []
+        source_way_ids: list[int] = []
+        for element in ways:
+            tags = dict(element.get("tags", {}))
+            width = self._parse_width_tag(tags.get("width"))
+            if width is not None:
+                widths.append(width)
+            source_way_ids.append(int(element["id"]))
+            polyline = [
+                TrackPoint(
+                    latitude=float(point["lat"]),
+                    longitude=float(point["lon"]),
+                    width_m=width,
+                )
+                for point in element.get("geometry", [])
+            ]
+            if len(polyline) >= 2:
+                way_entries.append(
+                    OSMWay(
+                        way_id=int(element["id"]),
+                        points=polyline,
+                        tags=tags,
+                        length_m=self._polyline_length_m(polyline),
+                    )
+                )
+        components = self._build_osm_components(way_entries)
+        selected = self._select_osm_component(components, expected_length_m=expected_length_m)
+        mainline = [way for way in selected if not self._is_auxiliary_way(way.tags)] or selected
+        merged = self._assemble_osm_component(mainline)
+        metadata = {
+            "osm_source": "overpass",
+            "osm_way_count": len(way_entries),
+            "osm_width_samples": len(widths),
+            "osm_mean_width_m": round(sum(widths) / len(widths), 3) if widths else None,
+            "osm_way_ids": source_way_ids[:20],
+            "osm_component_way_count": len(mainline),
+            "osm_component_length_m": round(sum(way.length_m for way in mainline), 3),
+            "osm_target_length_m": expected_length_m,
+            "osm_auxiliary_way_count": len(selected) - len(mainline),
+            "osm_auxiliary_way_ids": [
+                way.way_id for way in selected if self._is_auxiliary_way(way.tags)
+            ][:20],
+        }
+        return merged, metadata
+
+    def _points_from_street_overpass_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_length_m: float | None,
+        center_latitude: float,
+        center_longitude: float,
+        search_radius_m: int,
+    ) -> tuple[list[TrackPoint], dict[str, Any]]:
+        elements = payload.get("elements", [])
+        if not elements:
+            raise ValueError("Overpass payload does not contain street-network elements")
+        center = TrackPoint(latitude=center_latitude, longitude=center_longitude)
+        way_entries: list[OSMWay] = []
+        widths: list[float] = []
+        source_way_ids: list[int] = []
+        for element in elements:
+            if element.get("type") != "way" or not element.get("geometry"):
+                continue
+            tags = dict(element.get("tags", {}))
+            if not self._is_street_candidate(tags):
+                continue
+            width = self._parse_width_tag(tags.get("width"))
+            if width is not None:
+                widths.append(width)
+            raw_polyline = [
+                TrackPoint(
+                    latitude=float(point["lat"]),
+                    longitude=float(point["lon"]),
+                    width_m=width,
+                )
+                for point in element.get("geometry", [])
+            ]
+            polyline = self._clip_polyline_to_radius(
+                raw_polyline,
+                center=center,
+                max_radius_m=search_radius_m * 1.2,
+            )
+            if len(polyline) < 2:
+                continue
+            source_way_ids.append(int(element["id"]))
+            way_entries.append(
+                OSMWay(
+                    way_id=int(element["id"]),
+                    points=polyline,
+                    tags=tags,
+                    length_m=self._polyline_length_m(polyline),
+                )
+            )
+        if not way_entries:
+            raise ValueError("Street-network payload does not contain usable road geometries")
+
+        filtered = self._select_street_way_subset(
+            way_entries,
+            center=center,
+            search_radius_m=search_radius_m,
+            expected_length_m=expected_length_m,
+        )
+        components = self._build_osm_components(
+            filtered,
+            distance_threshold_m=STREET_CONNECT_THRESHOLD_M,
+        )
+        selected = self._select_street_component(
+            components,
+            center=center,
+            expected_length_m=expected_length_m,
+        )
+        cycle = self._find_best_osm_cycle(
+            selected,
+            expected_length_m=expected_length_m,
+            node_threshold_m=STREET_NODE_THRESHOLD_M,
+        )
+        if cycle:
+            merged = self._flatten_ordered_edges(cycle)
+            cycle_length_m = sum(way.length_m for _, _, way in cycle)
+            cycle_way_count = len(cycle)
+        else:
+            merged = self._assemble_osm_component(
+                selected,
+                node_threshold_m=STREET_NODE_THRESHOLD_M,
+            )
+            cycle_length_m = self._polyline_length_m(merged)
+            cycle_way_count = len(selected)
+        merged = self._downsample_points(merged)
+        metadata = {
+            "osm_source": "overpass_street_network",
+            "osm_way_count": len(way_entries),
+            "osm_street_candidate_count": len(filtered),
+            "osm_width_samples": len(widths),
+            "osm_mean_width_m": round(sum(widths) / len(widths), 3) if widths else None,
+            "osm_way_ids": source_way_ids[:20],
+            "osm_component_way_count": len(selected),
+            "osm_component_length_m": round(sum(way.length_m for way in selected), 3),
+            "osm_cycle_way_count": cycle_way_count,
+            "osm_cycle_length_m": round(cycle_length_m, 3),
+            "osm_target_length_m": expected_length_m,
+            "osm_search_kind": "street_network",
+            "osm_auxiliary_way_count": sum(1 for way in selected if self._is_auxiliary_way(way.tags)),
+        }
+        return merged, metadata
+
+    def _build_osm_components(
+        self,
+        ways: list[OSMWay],
+        distance_threshold_m: float = 80.0,
+    ) -> list[list[OSMWay]]:
+        if not ways:
+            raise ValueError("No OSM ways available")
+        adjacency: dict[int, set[int]] = {index: set() for index in range(len(ways))}
+        endpoints = [(way.points[0], way.points[-1]) for way in ways]
+        for left in range(len(ways)):
+            for right in range(left + 1, len(ways)):
+                distance = min(
+                    self._distance_m(point_a, point_b)
+                    for point_a in endpoints[left]
+                    for point_b in endpoints[right]
+                )
+                if distance <= distance_threshold_m:
+                    adjacency[left].add(right)
+                    adjacency[right].add(left)
+
+        seen: set[int] = set()
+        components: list[list[OSMWay]] = []
+        for index in range(len(ways)):
+            if index in seen:
+                continue
+            stack = [index]
+            seen.add(index)
+            component: list[OSMWay] = []
+            while stack:
+                current = stack.pop()
+                component.append(ways[current])
+                for neighbor in adjacency[current]:
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+            components.append(component)
+        return components
+
+    def _select_osm_component(
+        self,
+        components: list[list[OSMWay]],
+        *,
+        expected_length_m: float | None,
+    ) -> list[OSMWay]:
+        scored: list[tuple[float, list[OSMWay]]] = []
+        for component in components:
+            mainline = [way for way in component if not self._is_auxiliary_way(way.tags)]
+            if not mainline:
+                mainline = component
+            length_m = sum(way.length_m for way in mainline)
+            if expected_length_m is None or expected_length_m <= 0.0:
+                score = -length_m
+            else:
+                relative_error = abs(length_m - expected_length_m) / expected_length_m
+                score = relative_error - min(len(mainline), 200) / 10_000.0
+            scored.append((score, component))
+        scored.sort(key=lambda item: item[0])
+        return scored[0][1]
+
+    def _assemble_osm_component(
+        self,
+        ways: list[OSMWay],
+        node_threshold_m: float = 35.0,
+    ) -> list[TrackPoint]:
+        if not ways:
+            raise ValueError("No OSM ways available for assembly")
+        node_refs: list[TrackPoint] = []
+
+        def assign_node(point: TrackPoint) -> int:
+            for node_index, reference in enumerate(node_refs):
+                if self._distance_m(point, reference) <= node_threshold_m:
+                    return node_index
+            node_refs.append(point)
+            return len(node_refs) - 1
+
+        edges: list[tuple[int, int, OSMWay]] = []
+        adjacency: dict[int, list[int]] = {}
+        for edge_index, way in enumerate(ways):
+            start_node = assign_node(way.points[0])
+            end_node = assign_node(way.points[-1])
+            edges.append((start_node, end_node, way))
+            adjacency.setdefault(start_node, []).append(edge_index)
+            adjacency.setdefault(end_node, []).append(edge_index)
+
+        degree_one_nodes = [node for node, edge_ids in adjacency.items() if len(edge_ids) == 1]
+        if degree_one_nodes:
+            start_node = degree_one_nodes[0]
+            start_edge = adjacency[start_node][0]
+        else:
+            start_edge = max(range(len(edges)), key=lambda index: edges[index][2].length_m)
+            start_node = edges[start_edge][0]
+
+        ordered = self._walk_osm_edges(
+            edges, adjacency, start_node=start_node, start_edge=start_edge
+        )
+        used_edge_count = len({way.way_id for _, _, way in ordered})
+        if used_edge_count < len(ways):
+            remaining = [
+                way.points
+                for _, _, way in edges
+                if way.way_id not in {edge_way.way_id for _, _, edge_way in ordered}
+            ]
+            stitched = self._append_remaining_polylines(
+                self._flatten_ordered_edges(ordered),
+                remaining,
+            )
+        else:
+            stitched = self._flatten_ordered_edges(ordered)
+
+        if len(stitched) > 3 and self._distance_m(stitched[0], stitched[-1]) > 25.0:
+            stitched.append(stitched[0])
+        return self._downsample_points(stitched)
+
+    def _walk_osm_edges(
+        self,
+        edges: list[tuple[int, int, OSMWay]],
+        adjacency: dict[int, list[int]],
+        *,
+        start_node: int,
+        start_edge: int,
+    ) -> list[tuple[int, bool, OSMWay]]:
+        ordered: list[tuple[int, bool, OSMWay]] = []
+        used: set[int] = set()
+        current_node = start_node
+        current_edge = start_edge
+
+        while current_edge not in used:
+            edge_start, edge_end, way = edges[current_edge]
+            forward = edge_start == current_node
+            ordered.append((current_edge, forward, way))
+            used.add(current_edge)
+            current_node = edge_end if forward else edge_start
+            candidates = [
+                edge_id for edge_id in adjacency.get(current_node, []) if edge_id not in used
+            ]
+            if not candidates:
+                break
+            current_edge = max(candidates, key=lambda edge_id: edges[edge_id][2].length_m)
+
+        return ordered
+
+    def _flatten_ordered_edges(
+        self,
+        ordered: list[tuple[int, bool, OSMWay]],
+    ) -> list[TrackPoint]:
+        stitched: list[TrackPoint] = []
+        for _, forward, way in ordered:
+            points = way.points if forward else list(reversed(way.points))
+            if not stitched:
+                stitched.extend(points)
+            else:
+                stitched.extend(points[1:])
+        return stitched
+
+    def _append_remaining_polylines(
+        self,
+        stitched: list[TrackPoint],
+        remaining: list[list[TrackPoint]],
+        distance_threshold_m: float = 80.0,
+    ) -> list[TrackPoint]:
+        pending = [list(polyline) for polyline in remaining if len(polyline) >= 2]
+        while pending:
+            best_index: int | None = None
+            best_distance = float("inf")
+            best_mode = ""
+            for index, candidate in enumerate(pending):
+                modes = {
+                    "append_forward": self._distance_m(stitched[-1], candidate[0]),
+                    "append_reverse": self._distance_m(stitched[-1], candidate[-1]),
+                    "prepend_forward": self._distance_m(candidate[-1], stitched[0]),
+                    "prepend_reverse": self._distance_m(candidate[0], stitched[0]),
+                }
+                mode, distance = min(modes.items(), key=lambda item: item[1])
+                if distance < best_distance:
+                    best_distance = distance
+                    best_index = index
+                    best_mode = mode
+            if best_index is None or best_distance > distance_threshold_m:
+                break
+            candidate = pending.pop(best_index)
+            if best_mode == "append_forward":
+                stitched.extend(candidate[1:])
+            elif best_mode == "append_reverse":
+                stitched.extend(list(reversed(candidate))[1:])
+            elif best_mode == "prepend_forward":
+                stitched = candidate[:-1] + stitched
+            else:
+                stitched = list(reversed(candidate))[:-1] + stitched
+        return stitched
+
+    def _downsample_points(
+        self, points: list[TrackPoint], target_points: int = 220
+    ) -> list[TrackPoint]:
+        if len(points) <= target_points:
+            return points
+        step = max(1, len(points) // target_points)
+        reduced = [point for index, point in enumerate(points) if index % step == 0]
+        if reduced[-1] != points[-1]:
+            reduced.append(points[-1])
+        return reduced
+
+    def _parse_width_tag(self, width_tag: Any) -> float | None:
+        if width_tag in (None, ""):
+            return None
+        try:
+            return float(str(width_tag).replace("m", "").strip())
+        except ValueError:
+            return None
+
+    def _polyline_length_m(self, points: list[TrackPoint]) -> float:
+        return sum(self._distance_m(left, right) for left, right in pairwise(points))
+
+    def _segment_to_payload(self, segment: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": segment.segment_id,
+            "name": segment.name,
+            "type": segment.segment_type,
+            "start_m": segment.start_m,
+            "end_m": segment.end_m,
+            "width_m": segment.width_m,
+            "radius_m": segment.radius_m,
+            "elevation_delta_m": segment.elevation_delta_m,
+            "overtaking_viability": segment.overtaking_viability,
+            "preferred_battle_zone": segment.preferred_battle_zone,
+            "primary_recharge_zone": segment.primary_recharge_zone,
+            "primary_boost_zone": segment.primary_boost_zone,
+            "surface": {
+                "main_track": self._surface_to_payload(segment.main_surface),
+                "racing_line": self._surface_to_payload(segment.racing_line_surface),
+                "offline": self._surface_to_payload(segment.offline_surface),
+            },
+            "runoff": {"outside": self._runoff_to_payload(segment.runoff)},
+            "risk": self._risk_to_payload(segment.risk),
+            "metadata": dict(segment.metadata),
+        }
+        kerbs: dict[str, Any] = {}
+        if segment.inside_kerb is not None:
+            kerbs["inside"] = self._kerb_to_payload(segment.inside_kerb)
+        if segment.outside_kerb is not None:
+            kerbs["outside"] = self._kerb_to_payload(segment.outside_kerb)
+        if kerbs:
+            payload["kerbs"] = kerbs
+        if segment.track_limits is not None:
+            payload["track_limits"] = self._track_limits_to_payload(segment.track_limits)
+        return payload
+
+    def _surface_to_payload(self, surface: Any) -> dict[str, Any]:
+        return {
+            "type": surface.type,
+            "grip_dry": surface.grip_dry,
+            "grip_wet": surface.grip_wet,
+            "roughness": surface.roughness,
+            "drainage": surface.drainage,
+            "dirt_level": surface.dirt_level,
+            "marbles_level": surface.marbles_level,
+        }
+
+    def _runoff_to_payload(self, runoff: Any) -> dict[str, Any]:
+        return {
+            "type": runoff.type,
+            "width_m": runoff.width_m,
+            "grip_dry": runoff.grip_dry,
+            "grip_wet": runoff.grip_wet,
+            "rejoin_risk": runoff.rejoin_risk,
+            "recovery_probability": runoff.recovery_probability,
+        }
+
+    def _risk_to_payload(self, risk: Any) -> dict[str, Any]:
+        return {
+            "unsafe_closing_speed_threshold_kph": risk.unsafe_closing_speed_threshold_kph,
+            "side_by_side_risk": risk.side_by_side_risk,
+            "evasive_action_margin": risk.evasive_action_margin,
+            "energy_delta_sensitivity": risk.energy_delta_sensitivity,
+            "active_aero_sensitivity": risk.active_aero_sensitivity,
+            "visibility_risk": risk.visibility_risk,
+            "barrier_distance_m": risk.barrier_distance_m,
+            "impact_severity_multiplier": risk.impact_severity_multiplier,
+        }
+
+    def _kerb_to_payload(self, kerb: Any) -> dict[str, Any]:
+        return {
+            "type": kerb.type,
+            "height_mm": kerb.height_mm,
+            "width_m": kerb.width_m,
+            "grip_dry": kerb.grip_dry,
+            "grip_wet": kerb.grip_wet,
+            "destabilization_factor": kerb.destabilization_factor,
+            "bottoming_risk": kerb.bottoming_risk,
+            "launch_risk": kerb.launch_risk,
+            "track_limits_sensitive": kerb.track_limits_sensitive,
+        }
+
+    def _track_limits_to_payload(self, limits: Any) -> dict[str, Any]:
+        return {
+            "rule": limits.rule,
+            "allowed_wheels_out": limits.allowed_wheels_out,
+            "detection_probability": limits.detection_probability,
+            "warning_threshold": limits.warning_threshold,
+            "penalty_after": limits.penalty_after,
+            "time_gain_sensitive": limits.time_gain_sensitive,
+            "estimated_gain_if_abused_s": limits.estimated_gain_if_abused_s,
+        }
+
+    def _is_auxiliary_way(self, tags: dict[str, Any]) -> bool:
+        name = str(tags.get("name", "")).strip().lower()
+        service = str(tags.get("service", "")).strip().lower()
+        return "pit lane" in name or service == "pit_lane"
+
+    def _expected_length_from_metadata(self, metadata: dict[str, Any]) -> float | None:
+        candidate = metadata.get("target_length_m")
+        if candidate in (None, ""):
+            return None
+        try:
+            return float(candidate)
+        except (TypeError, ValueError):
+            return None

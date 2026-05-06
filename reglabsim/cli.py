@@ -134,6 +134,24 @@ def build_track_seed(
     typer.echo(json.dumps(result, indent=2))
 
 
+@app.command("build-track-pack")
+def build_track_pack(
+    track_ids: str = typer.Option("", help="Comma-separated subset of track ids"),
+    output_dir: Path = typer.Option(Path("outputs/generated_tracks"), help="Output directory"),
+    source_kind: str = typer.Option("osm", help="Source kind for the pack builder"),
+    fidelity_level: int = typer.Option(2, help="Target fidelity for generated seeds"),
+) -> None:
+    facade = create_facade()
+    selected = [value.strip() for value in track_ids.split(",") if value.strip()]
+    result = facade.build_track_pack(
+        track_ids=selected or None,
+        output_dir=output_dir,
+        source_kind=source_kind,
+        fidelity_level=fidelity_level,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
 @app.command("calibrate-public-lap")
 def calibrate_public_lap(
     year: int = typer.Argument(..., help="Season year"),
