@@ -219,3 +219,5 @@ __marimo__/
 
 # F1Lab-AI run artifacts
 outputs/
+tmp_*/
+tmp_*
