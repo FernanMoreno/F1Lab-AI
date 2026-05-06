@@ -48,7 +48,9 @@ class SimulationFacadeImpl:
         data_dir: Path | str | None = None,
     ):
         self._config_dir = Path(config_dir)
-        self._regulation_dir = Path(regulation_dir) if regulation_dir else self._config_dir / "regulations"
+        self._regulation_dir = (
+            Path(regulation_dir) if regulation_dir else self._config_dir / "regulations"
+        )
         self._car_families_path = (
             Path(car_families_path) if car_families_path else self._config_dir / "car_families.yaml"
         )
@@ -121,8 +123,12 @@ class SimulationFacadeImpl:
     def _campaign_runner(self) -> CampaignRunner:
         self._ensure_regulations_loaded()
         self._ensure_car_families_loaded()
-        regulation_payloads = {key: deepcopy(value) for key, value in self._regulation_payloads.items()}
-        car_family_payloads = {key: deepcopy(value) for key, value in self._car_family_payloads.items()}
+        regulation_payloads = {
+            key: deepcopy(value) for key, value in self._regulation_payloads.items()
+        }
+        car_family_payloads = {
+            key: deepcopy(value) for key, value in self._car_family_payloads.items()
+        }
         return CampaignRunner(
             regulations=regulation_payloads,
             car_families=car_family_payloads,
@@ -254,7 +260,9 @@ class SimulationFacadeImpl:
         data_root: str = "data",
     ) -> dict[str, dict[str, Any]]:
         """Fetch and persist Jolpica weekend results/qualifying."""
-        persisted = self._data_source().ingest_jolpica_weekend(season, round_num, data_root=data_root)
+        persisted = self._data_source().ingest_jolpica_weekend(
+            season, round_num, data_root=data_root
+        )
         return {key: dataset.to_dict() for key, dataset in persisted.items()}
 
     def ingest_historical_weather(
@@ -557,7 +565,9 @@ class SimulationFacadeImpl:
             "top_speed_kph": self._track_repo.get(circuit_id).avg_speed_kph + 35.0,
         }
 
-    def run_battle_experiment(self, config_path: str | Path, seed: int | None = None) -> dict[str, Any]:
+    def run_battle_experiment(
+        self, config_path: str | Path, seed: int | None = None
+    ) -> dict[str, Any]:
         raw = self._load_yaml(config_path)
         spec = CampaignSpec.from_dict(
             {
@@ -582,9 +592,13 @@ class SimulationFacadeImpl:
         return {
             "experiment_name": spec.campaign_name,
             "seed": spec.seed,
-            "num_overtakes": len([event for event in run["event_log"] if event["event_type"] == "overtake"]),
+            "num_overtakes": len(
+                [event for event in run["event_log"] if event["event_type"] == "overtake"]
+            ),
             "overtakes": overtakes,
-            "max_closing_speed_kph": max((event.get("closing_speed_kph", 0.0) for event in overtakes), default=0.0),
+            "max_closing_speed_kph": max(
+                (event.get("closing_speed_kph", 0.0) for event in overtakes), default=0.0
+            ),
             "dangerous_closing_speed_index": sum(
                 1 for event in overtakes if event.get("closing_speed_kph", 0.0) > 55.0
             )
@@ -594,7 +608,9 @@ class SimulationFacadeImpl:
             "_run_output": run,
         }
 
-    def run_race_experiment(self, config_path: str | Path, seed: int | None = None) -> dict[str, Any]:
+    def run_race_experiment(
+        self, config_path: str | Path, seed: int | None = None
+    ) -> dict[str, Any]:
         spec = CampaignSpec.from_yaml(config_path)
         if seed is not None:
             spec.seed = seed
@@ -617,7 +633,9 @@ class SimulationFacadeImpl:
             spec.seed = seed
         return self._campaign_runner().run_race(spec)
 
-    def run_redteam_campaign(self, config_path: str | Path, budget: int | None = None) -> dict[str, Any]:
+    def run_redteam_campaign(
+        self, config_path: str | Path, budget: int | None = None
+    ) -> dict[str, Any]:
         spec = CampaignSpec.from_yaml(config_path)
         if budget is not None:
             spec.repetitions = budget
@@ -643,7 +661,12 @@ class SimulationFacadeImpl:
             track_id=run_output["manifest"]["track_id"],
             replay_actions=replay_actions,
         )
-        return {"mode": "replay_resimulate", "original": run_output["manifest"], "rerun": rerun["manifest"], "result": rerun["result"]}
+        return {
+            "mode": "replay_resimulate",
+            "original": run_output["manifest"],
+            "rerun": rerun["manifest"],
+            "result": rerun["result"],
+        }
 
     def classify_failures(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         return [failure.to_dict() for failure in self._failure_classifier.classify(run_output)]
@@ -669,8 +692,12 @@ class SimulationFacadeImpl:
         runner = self._campaign_runner()
         for index in range(spec.repetitions):
             spec.seed = (seed or spec.seed) + index
-            run_a = runner.run_race(CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_a}))
-            run_b = runner.run_race(CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_b}))
+            run_a = runner.run_race(
+                CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_a})
+            )
+            run_b = runner.run_race(
+                CampaignSpec.from_dict(spec.to_dict() | {"regulation": regulation_b})
+            )
             metrics_a.append(run_a["metrics"])
             metrics_b.append(run_b["metrics"])
 
@@ -678,7 +705,8 @@ class SimulationFacadeImpl:
             return {
                 "avg_overtakes": sum(item["total_overtakes"] for item in items) / len(items),
                 "avg_incidents": sum(item["incident_count"] for item in items) / len(items),
-                "avg_closing_speed": sum(item["avg_closing_speed_kph"] for item in items) / len(items),
+                "avg_closing_speed": sum(item["avg_closing_speed_kph"] for item in items)
+                / len(items),
             }
 
         return {
@@ -689,7 +717,9 @@ class SimulationFacadeImpl:
             "regulation_b_metrics": aggregate(metrics_b),
         }
 
-    def compute_metrics(self, simulation_output: dict[str, Any], metric_names: list[str] | None = None) -> dict[str, Any]:
+    def compute_metrics(
+        self, simulation_output: dict[str, Any], metric_names: list[str] | None = None
+    ) -> dict[str, Any]:
         run_output = simulation_output.get("_run_output", simulation_output)
         base_metrics = dict(run_output.get("metrics", {}))
         if "overtakes" in simulation_output and "event_log" not in run_output:
@@ -747,10 +777,20 @@ class SimulationFacadeImpl:
         air_temp_c = float(weather_frame["air_temperature"].mean())
         humidity_pct = float(weather_frame["humidity"].mean())
         pressure_hpa = float(weather_frame["pressure"].mean())
-        wind_speed_mps = float(weather_frame["wind_speed"].mean() / 3.6) if weather_frame["wind_speed"].max() > 25 else float(weather_frame["wind_speed"].mean())
-        wind_direction_deg = float(weather_frame["wind_direction"].dropna().mean()) if weather_frame["wind_direction"].notna().any() else 0.0
+        wind_speed_mps = (
+            float(weather_frame["wind_speed"].mean() / 3.6)
+            if weather_frame["wind_speed"].max() > 25
+            else float(weather_frame["wind_speed"].mean())
+        )
+        wind_direction_deg = (
+            float(weather_frame["wind_direction"].dropna().mean())
+            if weather_frame["wind_direction"].notna().any()
+            else 0.0
+        )
         rain_intensity_mm_h = float(weather_frame["rainfall"].mean())
-        visibility_m = 1000.0 if rain_intensity_mm_h < 0.5 else max(250.0, 1000.0 - rain_intensity_mm_h * 80.0)
+        visibility_m = (
+            1000.0 if rain_intensity_mm_h < 0.5 else max(250.0, 1000.0 - rain_intensity_mm_h * 80.0)
+        )
         track_temp_c = air_temp_c + max(4.0, min(18.0, 8.0 + wind_speed_mps * 0.4))
         wetness_level = min(1.0, rain_intensity_mm_h / 8.0)
         scenario = ConditionsScenario(

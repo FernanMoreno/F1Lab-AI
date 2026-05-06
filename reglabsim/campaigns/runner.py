@@ -133,8 +133,12 @@ class CampaignRunner:
             team_orders: dict[str, Any] = {}
             actions = {}
             for team_id in sorted({car.team_id for car in cars if not car.retired}):
-                team_cars = [car.to_dict() for car in cars if car.team_id == team_id and not car.retired]
-                rivals = [car.to_dict() for car in cars if car.team_id != team_id and not car.retired][:4]
+                team_cars = [
+                    car.to_dict() for car in cars if car.team_id == team_id and not car.retired
+                ]
+                rivals = [
+                    car.to_dict() for car in cars if car.team_id != team_id and not car.retired
+                ][:4]
                 team_obs = builder.build_team_observation(
                     team_id=team_id,
                     cars=team_cars,
@@ -145,7 +149,9 @@ class CampaignRunner:
                     rivals=rivals,
                     recent_events=recent_events,
                 )
-                prompt_trace_metadata.append({"lap": lap, "team_id": team_id, "mode": team_agents[team_id].mode})
+                prompt_trace_metadata.append(
+                    {"lap": lap, "team_id": team_id, "mode": team_agents[team_id].mode}
+                )
                 for car in team_cars:
                     team_order = team_agents[team_id].decide(team_obs, car["car_id"])
                     team_orders[car["car_id"]] = team_order
@@ -165,13 +171,21 @@ class CampaignRunner:
                     warnings=car.warnings,
                     memory=[],
                 )
-                observation_log.append({"lap": lap, "car_id": car.car_id, "observation": driver_obs.to_dict()})
-                prompt_trace_metadata.append({"lap": lap, "car_id": car.car_id, "mode": driver_agents[car.car_id].mode})
+                observation_log.append(
+                    {"lap": lap, "car_id": car.car_id, "observation": driver_obs.to_dict()}
+                )
+                prompt_trace_metadata.append(
+                    {"lap": lap, "car_id": car.car_id, "mode": driver_agents[car.car_id].mode}
+                )
                 driver_intent = driver_agents[car.car_id].decide(driver_obs)
                 action = arbitrator.arbitrate(team_orders[car.car_id], driver_intent, spec.mode)
-                validated_action, validation_entry = validator.validate(action, regulation, spec.laps)
+                validated_action, validation_entry = validator.validate(
+                    action, regulation, spec.laps
+                )
                 actions[car.car_id] = validated_action
-                action_log.append({"lap": lap, "car_id": car.car_id, "action": validated_action.to_dict()})
+                action_log.append(
+                    {"lap": lap, "car_id": car.car_id, "action": validated_action.to_dict()}
+                )
                 validation_log.append(validation_entry)
 
             cars, lap_events, lap_physics = microkernel.resolve_lap(
@@ -188,7 +202,10 @@ class CampaignRunner:
                 lap=lap,
                 events=lap_events,
                 cars=cars,
-                weather={"visibility_m": weather.visibility_m, "rain_intensity_mm_h": weather.rain_intensity_mm_h},
+                weather={
+                    "visibility_m": weather.visibility_m,
+                    "rain_intensity_mm_h": weather.rain_intensity_mm_h,
+                },
             )
 
             physics_resolution_log.extend(lap_physics)
@@ -254,7 +271,7 @@ class CampaignRunner:
         """Run a multi-track or repeated campaign."""
         runs = []
         for track_id in spec.tracks:
-            for repetition in range(spec.repetitions):
+            for _repetition in range(spec.repetitions):
                 runs.append(self.run_race(spec, track_id=track_id))
         ranking = rank_failures(runs)
         summary = campaign_summary(spec.campaign_name, runs, ranking)
@@ -262,7 +279,10 @@ class CampaignRunner:
             schema_version="campaign_report.v1",
             campaign_name=spec.campaign_name,
             mode=spec.mode,
-            runs=[{"manifest": run["manifest"], "metrics": run["metrics"], "result": run["result"]} for run in runs],
+            runs=[
+                {"manifest": run["manifest"], "metrics": run["metrics"], "result": run["result"]}
+                for run in runs
+            ],
             ranking=ranking,
             summary=summary,
         )
@@ -351,7 +371,11 @@ class CampaignRunner:
         return team_agents, driver_agents
 
     def _estimated_rival(self, cars: list[CarRuntimeState], car: CarRuntimeState) -> dict[str, Any]:
-        rivals = [candidate for candidate in cars if candidate.car_id != car.car_id and not candidate.retired]
+        rivals = [
+            candidate
+            for candidate in cars
+            if candidate.car_id != car.car_id and not candidate.retired
+        ]
         if not rivals:
             return {}
         rival = min(rivals, key=lambda candidate: abs(candidate.position - car.position))
@@ -361,7 +385,9 @@ class CampaignRunner:
             "visibility_level": "good",
         }
 
-    def _compute_metrics(self, event_log: list[dict[str, Any]], cars: list[CarRuntimeState]) -> dict[str, Any]:
+    def _compute_metrics(
+        self, event_log: list[dict[str, Any]], cars: list[CarRuntimeState]
+    ) -> dict[str, Any]:
         overtakes = [event for event in event_log if event["event_type"] == "overtake"]
         incidents = [event for event in event_log if event["event_type"] == "incident"]
         attack_events = [event for event in event_log if event["event_type"] == "attack_phase"]
@@ -373,7 +399,10 @@ class CampaignRunner:
             "attack_events": len(attack_events),
             "track_limit_breaches": len(track_limits),
             "avg_closing_speed_kph": round(
-                sum(event["details"].get("closing_speed_kph", 0.0) for event in overtakes + incidents)
+                sum(
+                    event["details"].get("closing_speed_kph", 0.0)
+                    for event in overtakes + incidents
+                )
                 / max(len(overtakes) + len(incidents), 1),
                 3,
             ),

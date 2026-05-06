@@ -92,7 +92,9 @@ def describe_track(track_id: str = typer.Argument(..., help="Track id")) -> None
 
 
 @app.command("show-condition-profile")
-def show_condition_profile(profile_id: str = typer.Argument(..., help="Condition profile id")) -> None:
+def show_condition_profile(
+    profile_id: str = typer.Argument(..., help="Condition profile id"),
+) -> None:
     facade = create_facade()
     typer.echo(json.dumps(facade.load_condition_profile(profile_id), indent=2))
 
@@ -142,7 +144,9 @@ def calibrate_public_lap(
     drivers: str = typer.Option("", help="Comma-separated driver numbers"),
     families: str = typer.Option("", help="Comma-separated candidate car families"),
     output_dir: Path | None = typer.Option(None, help="Optional report/profile output directory"),
-    ingest_if_missing: bool = typer.Option(True, help="Fetch public session bundle before calibrating"),
+    ingest_if_missing: bool = typer.Option(
+        True, help="Fetch public session bundle before calibrating"
+    ),
 ) -> None:
     facade = create_facade()
     driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
@@ -173,7 +177,9 @@ def calibrate_public_battle(
     num_cars: int = typer.Option(6, help="Calibration pack size"),
     laps: int | None = typer.Option(None, help="Override representative lap count"),
     output_dir: Path | None = typer.Option(None, help="Optional report/profile output directory"),
-    ingest_if_missing: bool = typer.Option(True, help="Fetch public session bundle before calibrating"),
+    ingest_if_missing: bool = typer.Option(
+        True, help="Fetch public session bundle before calibrating"
+    ),
 ) -> None:
     facade = create_facade()
     driver_numbers = [int(value) for value in drivers.split(",") if value.strip()]
@@ -201,7 +207,16 @@ def run_multiagent_race(
 ) -> None:
     facade = create_facade()
     result = facade.run_multiagent_race(config, mode=mode, seed=seed)
-    typer.echo(json.dumps({"manifest": result["manifest"], "result": result["result"], "metrics": result["metrics"]}, indent=2))
+    typer.echo(
+        json.dumps(
+            {
+                "manifest": result["manifest"],
+                "result": result["result"],
+                "metrics": result["metrics"],
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command("run-redteam-campaign")
@@ -240,7 +255,9 @@ def compare_regulations(
     repetitions: int = typer.Option(3, help="Number of repeated comparisons"),
 ) -> None:
     facade = create_facade()
-    result = facade.compare_regulations(regulation_a, regulation_b, experiment_config, n_repetitions=repetitions)
+    result = facade.compare_regulations(
+        regulation_a, regulation_b, experiment_config, n_repetitions=repetitions
+    )
     typer.echo(json.dumps(result, indent=2))
 
 
@@ -269,7 +286,11 @@ def validate_public_session(
 @app.command("propose-mitigations")
 def propose_mitigations(run_dir: Path = typer.Argument(..., exists=True, readable=True)) -> None:
     facade = create_facade()
-    run_output = facade.run_multiagent_race(Path(run_dir)) if run_dir.suffix == ".yaml" else facade._replay.load_run(run_dir)
+    run_output = (
+        facade.run_multiagent_race(Path(run_dir))
+        if run_dir.suffix == ".yaml"
+        else facade._replay.load_run(run_dir)
+    )
     result = facade.propose_mitigations(run_output)
     typer.echo(json.dumps(result, indent=2))
 

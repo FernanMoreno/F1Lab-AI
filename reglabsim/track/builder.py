@@ -86,9 +86,15 @@ class GeospatialTrackBuilder:
             "name": metadata["name"],
             "country": metadata["country"],
             "length_m": round(total_length_m, 3),
-            "turns": int(turns if turns is not None else sum(seg["type"] != "straight" for seg in segments)),
+            "turns": int(
+                turns if turns is not None else sum(seg["type"] != "straight" for seg in segments)
+            ),
             "laps": int(laps if laps is not None else metadata.get("laps", 0)),
-            "race_distance_m": float(race_distance_m if race_distance_m is not None else metadata.get("race_distance_m", total_length_m)),
+            "race_distance_m": float(
+                race_distance_m
+                if race_distance_m is not None
+                else metadata.get("race_distance_m", total_length_m)
+            ),
             "avg_speed_kph": float(metadata.get("avg_speed_kph", 200.0)),
             "fidelity_level": fidelity_level,
             "sources": list(sources or ["local_centerline_seed"]),
@@ -112,7 +118,9 @@ class GeospatialTrackBuilder:
     ) -> dict[str, Any]:
         """Build track YAML from a CSV centerline file."""
         points = self._load_csv_points(csv_path)
-        return self.build_from_existing_seed(track_id=track_id, metadata=metadata, centerline=points, **kwargs)
+        return self.build_from_existing_seed(
+            track_id=track_id, metadata=metadata, centerline=points, **kwargs
+        )
 
     def build_from_geojson(
         self,
@@ -124,7 +132,9 @@ class GeospatialTrackBuilder:
     ) -> dict[str, Any]:
         """Build track YAML from a GeoJSON LineString feature."""
         points = self._load_geojson_points(geojson_path)
-        return self.build_from_existing_seed(track_id=track_id, metadata=metadata, centerline=points, **kwargs)
+        return self.build_from_existing_seed(
+            track_id=track_id, metadata=metadata, centerline=points, **kwargs
+        )
 
     def build_from_osm(
         self,
@@ -168,7 +178,11 @@ class GeospatialTrackBuilder:
     def save_yaml(self, track_payload: dict[str, Any], path: str | Path | None = None) -> Path:
         """Persist one generated track YAML payload."""
         self._tracks_dir.mkdir(parents=True, exist_ok=True)
-        target = Path(path) if path is not None else self._tracks_dir / f"{track_payload['track_id']}.yaml"
+        target = (
+            Path(path)
+            if path is not None
+            else self._tracks_dir / f"{track_payload['track_id']}.yaml"
+        )
         with open(target, "w", encoding="utf-8") as handle:
             yaml.safe_dump(track_payload, handle, sort_keys=False)
         return target
@@ -185,7 +199,8 @@ class GeospatialTrackBuilder:
                 if latitude is None or longitude is None:
                     if x_m is None or y_m is None:
                         raise ValueError(
-                            "CSV centerline rows require either latitude/longitude or x_m/y_m columns"
+                            "CSV centerline rows require either"
+                            " latitude/longitude or x_m/y_m columns"
                         )
                 points.append(
                     TrackPoint(
@@ -251,7 +266,9 @@ class GeospatialTrackBuilder:
             segment_points = points[start_idx : end_idx + 1]
             segment_length = cumulative[end_idx] - cumulative[start_idx]
             width = self._segment_width(segment_points)
-            elevation_delta = (segment_points[-1].elevation_m or 0.0) - (segment_points[0].elevation_m or 0.0)
+            elevation_delta = (segment_points[-1].elevation_m or 0.0) - (
+                segment_points[0].elevation_m or 0.0
+            )
             kind = self._classify_window(points, start_idx, end_idx)
             radius = self._estimate_radius(segment_points) if kind != "straight" else None
             risk = self._default_risk(kind, segment_length, radius)
@@ -265,17 +282,31 @@ class GeospatialTrackBuilder:
                     width_m=round(width, 2),
                     radius_m=round(radius, 2) if radius is not None else None,
                     elevation_delta_m=round(elevation_delta, 2),
-                    overtaking_viability="high" if kind == "straight" and segment_length > 450 else ("medium" if kind == "braking_zone" else "low"),
-                    preferred_battle_zone=kind in {"straight", "braking_zone"} and segment_length > 220,
+                    overtaking_viability="high"
+                    if kind == "straight" and segment_length > 450
+                    else ("medium" if kind == "braking_zone" else "low"),
+                    preferred_battle_zone=kind in {"straight", "braking_zone"}
+                    and segment_length > 220,
                     primary_recharge_zone=kind in {"medium_corner", "slow_corner", "braking_zone"},
                     primary_boost_zone=kind == "straight" and segment_length > 300,
                     risk=risk,
                     surface={
                         "main_track": {"type": "asphalt", "grip_dry": 1.0, "grip_wet": 0.72},
-                        "offline": {"type": "asphalt", "grip_dry": 0.9, "grip_wet": 0.62, "dirt_level": 0.2, "marbles_level": 0.2},
+                        "offline": {
+                            "type": "asphalt",
+                            "grip_dry": 0.9,
+                            "grip_wet": 0.62,
+                            "dirt_level": 0.2,
+                            "marbles_level": 0.2,
+                        },
                     },
                     runoff={
-                        "outside": {"type": "asphalt", "width_m": max(8.0, width * 0.8), "grip_dry": 0.82, "grip_wet": 0.54}
+                        "outside": {
+                            "type": "asphalt",
+                            "width_m": max(8.0, width * 0.8),
+                            "grip_dry": 0.82,
+                            "grip_wet": 0.54,
+                        }
                     },
                     track_limits=self._default_track_limits(kind),
                     metadata={
@@ -287,7 +318,10 @@ class GeospatialTrackBuilder:
         return built_segments
 
     def _classify_window(self, points: list[TrackPoint], start_idx: int, end_idx: int) -> str:
-        curvatures = [self._turn_angle_deg(points[index - 1], points[index], points[index + 1]) for index in range(max(1, start_idx + 1), min(end_idx, len(points) - 2) + 1)]
+        curvatures = [
+            self._turn_angle_deg(points[index - 1], points[index], points[index + 1])
+            for index in range(max(1, start_idx + 1), min(end_idx, len(points) - 2) + 1)
+        ]
         if not curvatures:
             return "straight"
         avg_curvature = sum(abs(value) for value in curvatures) / len(curvatures)
@@ -354,7 +388,9 @@ class GeospatialTrackBuilder:
             "estimated_gain_if_abused_s": 0.03 if kind == "slow_corner" else 0.015,
         }
 
-    def _turn_angle_deg(self, prev_point: TrackPoint, point: TrackPoint, next_point: TrackPoint) -> float:
+    def _turn_angle_deg(
+        self, prev_point: TrackPoint, point: TrackPoint, next_point: TrackPoint
+    ) -> float:
         v1x, v1y = self._planar_xy(prev_point, point)
         v2x, v2y = self._planar_xy(point, next_point)
         dot = v1x * v2x + v1y * v2y
@@ -362,10 +398,22 @@ class GeospatialTrackBuilder:
         return math.degrees(math.atan2(det, dot))
 
     def _planar_xy(self, start: TrackPoint, end: TrackPoint) -> tuple[float, float]:
-        if start.x_m is not None and start.y_m is not None and end.x_m is not None and end.y_m is not None:
+        if (
+            start.x_m is not None
+            and start.y_m is not None
+            and end.x_m is not None
+            and end.y_m is not None
+        ):
             return (end.x_m - start.x_m, end.y_m - start.y_m)
-        if start.latitude is None or start.longitude is None or end.latitude is None or end.longitude is None:
-            raise ValueError("Track points require either planar x/y or latitude/longitude coordinates")
+        if (
+            start.latitude is None
+            or start.longitude is None
+            or end.latitude is None
+            or end.longitude is None
+        ):
+            raise ValueError(
+                "Track points require either planar x/y or latitude/longitude coordinates"
+            )
         lat_scale = 111_320.0
         lon_scale = 111_320.0 * math.cos(math.radians((start.latitude + end.latitude) / 2.0))
         return (
@@ -374,10 +422,22 @@ class GeospatialTrackBuilder:
         )
 
     def _distance_m(self, start: TrackPoint, end: TrackPoint) -> float:
-        if start.x_m is not None and start.y_m is not None and end.x_m is not None and end.y_m is not None:
+        if (
+            start.x_m is not None
+            and start.y_m is not None
+            and end.x_m is not None
+            and end.y_m is not None
+        ):
             return math.hypot(end.x_m - start.x_m, end.y_m - start.y_m)
-        if start.latitude is None or start.longitude is None or end.latitude is None or end.longitude is None:
-            raise ValueError("Track points require either planar x/y or latitude/longitude coordinates")
+        if (
+            start.latitude is None
+            or start.longitude is None
+            or end.latitude is None
+            or end.longitude is None
+        ):
+            raise ValueError(
+                "Track points require either planar x/y or latitude/longitude coordinates"
+            )
         radius = 6_371_000.0
         lat1 = math.radians(start.latitude)
         lat2 = math.radians(end.latitude)

@@ -99,7 +99,9 @@ class OpenF1Client:
 
     def fetch_lap_data(self, circuit_id: str, session_type: str, year: int) -> pd.DataFrame:
         """Fetch lap timing data for a resolved OpenF1 session."""
-        session = self.resolve_session(SessionQuery(year=year, track_id=circuit_id, session_type=session_type))
+        session = self.resolve_session(
+            SessionQuery(year=year, track_id=circuit_id, session_type=session_type)
+        )
         payload = self._get_json("laps", {"session_key": int(session["session_key"])})
         frame = self._frame(payload, "laps")
         if not frame.empty:
@@ -171,7 +173,9 @@ class OpenF1Client:
     def fetch_race_control(self, session_id: str) -> pd.DataFrame:
         """Fetch race-control messages for one session."""
         self._ensure_connected()
-        return self._frame(self._get_json("race_control", {"session_key": int(session_id)}), "race_control")
+        return self._frame(
+            self._get_json("race_control", {"session_key": int(session_id)}), "race_control"
+        )
 
     def fetch_session_bundle(self, query: SessionQuery) -> dict[str, pd.DataFrame]:
         """Fetch session metadata, laps, weather and control messages in one call."""
@@ -193,7 +197,9 @@ class OpenF1Client:
                 except FetchError:
                     continue
             bundle["telemetry"] = (
-                pd.concat(telemetry_frames, ignore_index=True) if telemetry_frames else pd.DataFrame()
+                pd.concat(telemetry_frames, ignore_index=True)
+                if telemetry_frames
+                else pd.DataFrame()
             )
         return bundle
 

@@ -55,7 +55,9 @@ class LapSimulator:
 
         segments = list(getattr(track_circuit, "segments", []))
         if not segments:
-            segments = self._fallback_segments(track_circuit.length_m if hasattr(track_circuit, "length_m") else 5793.0)
+            segments = self._fallback_segments(
+                track_circuit.length_m if hasattr(track_circuit, "length_m") else 5793.0
+            )
         track_length_m = float(getattr(track_circuit, "length_m", 5793.0))
         raw_segment_lengths = [
             float(self._segment_value(segment, "length_m", 0.0))
@@ -85,13 +87,17 @@ class LapSimulator:
         mass_factor = 780.0 / max(mass_kg, 650.0)
         wind_penalty = max(0.0, wind_speed_mps - 4.0) * 0.012 * calibration["wind_penalty_scale"]
 
-        for segment, raw_length_m in zip(segments, raw_segment_lengths):
+        for segment, raw_length_m in zip(segments, raw_segment_lengths, strict=True):
             length_m = max(1.0, raw_length_m * length_scale)
             segment_type = str(self._segment_value(segment, "segment_type", "straight"))
             radius = self._segment_value(segment, "radius_m", None)
             local_grip = effective_grip
             if hasattr(segment, "main_surface"):
-                local_grip *= float(segment.main_surface.grip_wet if rain_intensity_mm_h > 0.0 else segment.main_surface.grip_dry)
+                local_grip *= float(
+                    segment.main_surface.grip_wet
+                    if rain_intensity_mm_h > 0.0
+                    else segment.main_surface.grip_dry
+                )
 
             if segment_type == "straight":
                 base_speed = 82.0 * power_factor * aero_drag_factor * mass_factor
@@ -100,7 +106,9 @@ class LapSimulator:
                     base_speed *= 1.0 + ers_soc * 0.06
             else:
                 reference_radius = float(radius) if radius else 180.0
-                corner_base = math.sqrt(max(55.0, reference_radius) * 1.85 * local_grip * downforce_factor * mass_factor)
+                corner_base = math.sqrt(
+                    max(55.0, reference_radius) * 1.85 * local_grip * downforce_factor * mass_factor
+                )
                 base_speed = corner_base * calibration["corner_speed_factor"]
                 if segment_type in {"slow_corner", "braking_zone", "chicane"}:
                     base_speed *= 0.92
@@ -155,13 +163,55 @@ class LapSimulator:
     def _fallback_segments(self, track_length_m: float) -> list[dict[str, Any]]:
         base = track_length_m / 9.0
         return [
-            {"segment_type": "straight", "start_m": 0.0, "end_m": base * 2, "radius_m": None, "length_m": base * 2},
-            {"segment_type": "fast_corner", "start_m": base * 2, "end_m": base * 3, "radius_m": 220.0, "length_m": base},
-            {"segment_type": "straight", "start_m": base * 3, "end_m": base * 4.5, "radius_m": None, "length_m": base * 1.5},
-            {"segment_type": "medium_corner", "start_m": base * 4.5, "end_m": base * 5.5, "radius_m": 140.0, "length_m": base},
-            {"segment_type": "straight", "start_m": base * 5.5, "end_m": base * 7, "radius_m": None, "length_m": base * 1.5},
-            {"segment_type": "slow_corner", "start_m": base * 7, "end_m": base * 8, "radius_m": 80.0, "length_m": base},
-            {"segment_type": "straight", "start_m": base * 8, "end_m": track_length_m, "radius_m": None, "length_m": track_length_m - base * 8},
+            {
+                "segment_type": "straight",
+                "start_m": 0.0,
+                "end_m": base * 2,
+                "radius_m": None,
+                "length_m": base * 2,
+            },
+            {
+                "segment_type": "fast_corner",
+                "start_m": base * 2,
+                "end_m": base * 3,
+                "radius_m": 220.0,
+                "length_m": base,
+            },
+            {
+                "segment_type": "straight",
+                "start_m": base * 3,
+                "end_m": base * 4.5,
+                "radius_m": None,
+                "length_m": base * 1.5,
+            },
+            {
+                "segment_type": "medium_corner",
+                "start_m": base * 4.5,
+                "end_m": base * 5.5,
+                "radius_m": 140.0,
+                "length_m": base,
+            },
+            {
+                "segment_type": "straight",
+                "start_m": base * 5.5,
+                "end_m": base * 7,
+                "radius_m": None,
+                "length_m": base * 1.5,
+            },
+            {
+                "segment_type": "slow_corner",
+                "start_m": base * 7,
+                "end_m": base * 8,
+                "radius_m": 80.0,
+                "length_m": base,
+            },
+            {
+                "segment_type": "straight",
+                "start_m": base * 8,
+                "end_m": track_length_m,
+                "radius_m": None,
+                "length_m": track_length_m - base * 8,
+            },
         ]
 
     def _segment_value(self, segment: Any, key: str, default: Any) -> Any:

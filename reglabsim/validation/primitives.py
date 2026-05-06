@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -159,7 +160,9 @@ class PublicPrimitiveCalibrator:
         weather = self._load_dataset("weather", query)
         position = self._load_dataset("position", query)
         race_control = self._load_dataset("race_control", query)
-        actual_summary = self._summarize_battle_actual(laps_frame, weather, position, race_control, query)
+        actual_summary = self._summarize_battle_actual(
+            laps_frame, weather, position, race_control, query
+        )
 
         representative_laps = laps or max(
             8,
@@ -225,7 +228,9 @@ class PublicPrimitiveCalibrator:
             error_metrics=dict(best_entry["error_metrics"]),
             status="calibrated" if best_entry["score"] <= 0.9 else "approximate_fit",
         )
-        saved = self._persist_report(report, output_dir=output_dir, slug=self._slug(query, "battle"))
+        saved = self._persist_report(
+            report, output_dir=output_dir, slug=self._slug(query, "battle")
+        )
         return PrimitiveCalibrationReport(**(report.to_dict() | saved)).to_dict()
 
     def _load_dataset(self, dataset_name: str, query: SessionQuery) -> pd.DataFrame:
@@ -260,13 +265,25 @@ class PublicPrimitiveCalibrator:
             "median_st_speed_kph": float(representative["st_speed"].dropna().median())
             if "st_speed" in representative.columns and representative["st_speed"].notna().any()
             else 0.0,
-            "sector_1_share": float((representative["duration_sector_1"].fillna(0.0) / sector_total.replace(0.0, pd.NA)).dropna().mean())
+            "sector_1_share": float(
+                (representative["duration_sector_1"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
+                .dropna()
+                .mean()
+            )
             if "duration_sector_1" in representative.columns
             else 0.0,
-            "sector_2_share": float((representative["duration_sector_2"].fillna(0.0) / sector_total.replace(0.0, pd.NA)).dropna().mean())
+            "sector_2_share": float(
+                (representative["duration_sector_2"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
+                .dropna()
+                .mean()
+            )
             if "duration_sector_2" in representative.columns
             else 0.0,
-            "sector_3_share": float((representative["duration_sector_3"].fillna(0.0) / sector_total.replace(0.0, pd.NA)).dropna().mean())
+            "sector_3_share": float(
+                (representative["duration_sector_3"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
+                .dropna()
+                .mean()
+            )
             if "duration_sector_3" in representative.columns
             else 0.0,
             "lap_count": len(representative),
@@ -280,9 +297,15 @@ class PublicPrimitiveCalibrator:
             "avg_lap_time_s": float(sim_result["lap_time_s"]),
             "median_lap_time_s": float(sim_result["lap_time_s"]),
             "median_st_speed_kph": float(sim_result["top_speed_mps"] * 3.6),
-            "sector_1_share": float(sector_times[0] / sector_total) if len(sector_times) > 0 else 0.0,
-            "sector_2_share": float(sector_times[1] / sector_total) if len(sector_times) > 1 else 0.0,
-            "sector_3_share": float(sector_times[2] / sector_total) if len(sector_times) > 2 else 0.0,
+            "sector_1_share": float(sector_times[0] / sector_total)
+            if len(sector_times) > 0
+            else 0.0,
+            "sector_2_share": float(sector_times[1] / sector_total)
+            if len(sector_times) > 1
+            else 0.0,
+            "sector_3_share": float(sector_times[2] / sector_total)
+            if len(sector_times) > 2
+            else 0.0,
         }
 
     def _lap_errors(
@@ -292,13 +315,18 @@ class PublicPrimitiveCalibrator:
     ) -> dict[str, float]:
         actual_lap = actual_summary["avg_lap_time_s"]
         actual_speed = max(actual_summary["median_st_speed_kph"], 1e-6)
-        sector_error = sum(
-            abs(simulated_summary[key] - actual_summary[key])
-            for key in ("sector_1_share", "sector_2_share", "sector_3_share")
-        ) / 3.0
+        sector_error = (
+            sum(
+                abs(simulated_summary[key] - actual_summary[key])
+                for key in ("sector_1_share", "sector_2_share", "sector_3_share")
+            )
+            / 3.0
+        )
         return {
-            "lap_time_mape": abs(simulated_summary["avg_lap_time_s"] - actual_lap) / max(actual_lap, 1e-6),
-            "top_speed_mape": abs(simulated_summary["median_st_speed_kph"] - actual_speed) / actual_speed,
+            "lap_time_mape": abs(simulated_summary["avg_lap_time_s"] - actual_lap)
+            / max(actual_lap, 1e-6),
+            "top_speed_mape": abs(simulated_summary["median_st_speed_kph"] - actual_speed)
+            / actual_speed,
             "sector_share_error": sector_error,
         }
 
@@ -339,7 +367,9 @@ class PublicPrimitiveCalibrator:
         time_ratio = baseline_summary["avg_lap_time_s"] / max(target_lap, 1.0)
         corner_speed_factor = self._clamp(time_ratio**0.7, 0.75, 1.65)
         grip_factor = self._clamp(1.0 + (time_ratio - 1.0) * 0.45, 0.85, 1.3)
-        segment_time_scale = self._clamp(target_lap / max(baseline_summary["avg_lap_time_s"], 1.0), 0.6, 1.25)
+        segment_time_scale = self._clamp(
+            target_lap / max(baseline_summary["avg_lap_time_s"], 1.0), 0.6, 1.25
+        )
         return {
             **DEFAULT_CALIBRATION,
             "straight_speed_factor": round(straight_speed_factor, 4),
@@ -361,16 +391,23 @@ class PublicPrimitiveCalibrator:
                         profile = {
                             **center,
                             "straight_speed_factor": round(
-                                self._clamp(center["straight_speed_factor"] + straight_offset, 0.78, 1.28), 4
+                                self._clamp(
+                                    center["straight_speed_factor"] + straight_offset, 0.78, 1.28
+                                ),
+                                4,
                             ),
                             "corner_speed_factor": round(
-                                self._clamp(center["corner_speed_factor"] + corner_offset, 0.72, 1.8), 4
+                                self._clamp(
+                                    center["corner_speed_factor"] + corner_offset, 0.72, 1.8
+                                ),
+                                4,
                             ),
                             "grip_factor": round(
                                 self._clamp(center["grip_factor"] + grip_offset, 0.82, 1.35), 4
                             ),
                             "segment_time_scale": round(
-                                self._clamp(center["segment_time_scale"] + time_offset, 0.55, 1.3), 4
+                                self._clamp(center["segment_time_scale"] + time_offset, 0.55, 1.3),
+                                4,
                             ),
                         }
                         if profile not in profiles:
@@ -404,16 +441,24 @@ class PublicPrimitiveCalibrator:
         safety_events = 0
         if "message" in race_control.columns:
             lowered = race_control["message"].fillna("").str.lower()
-            safety_events = int(lowered.str.contains("safety car|virtual safety car|red flag|yellow").sum())
+            safety_events = int(
+                lowered.str.contains("safety car|virtual safety car|red flag|yellow").sum()
+            )
 
-        st_speed = valid_laps["st_speed"].dropna() if "st_speed" in valid_laps.columns else pd.Series(dtype=float)
+        st_speed = (
+            valid_laps["st_speed"].dropna()
+            if "st_speed" in valid_laps.columns
+            else pd.Series(dtype=float)
+        )
         closing_speed_proxy_kph = (
-            float(st_speed.quantile(0.9) - st_speed.quantile(0.5))
-            if not st_speed.empty
-            else 20.0
+            float(st_speed.quantile(0.9) - st_speed.quantile(0.5)) if not st_speed.empty else 20.0
         )
         weather_inputs, track_inputs = self._weather_inputs(weather)
-        lap_count = int(valid_laps["lap_number"].nunique()) if "lap_number" in valid_laps.columns else len(valid_laps)
+        lap_count = (
+            int(valid_laps["lap_number"].nunique())
+            if "lap_number" in valid_laps.columns
+            else len(valid_laps)
+        )
         return {
             "lap_count": lap_count,
             "driver_count": driver_count,
@@ -432,15 +477,21 @@ class PublicPrimitiveCalibrator:
         snapshots = run_output.get("state_snapshots", [])
         position_changes = 0
         total_transitions = 0
-        for previous, current in zip(snapshots, snapshots[1:]):
+        for previous, current in pairwise(snapshots):
             prev_positions = {
-                car["car_id"]: car["position"] for car in previous.get("cars", []) if not car.get("retired", False)
+                car["car_id"]: car["position"]
+                for car in previous.get("cars", [])
+                if not car.get("retired", False)
             }
             current_positions = {
-                car["car_id"]: car["position"] for car in current.get("cars", []) if not car.get("retired", False)
+                car["car_id"]: car["position"]
+                for car in current.get("cars", [])
+                if not car.get("retired", False)
             }
             shared = set(prev_positions) & set(current_positions)
-            position_changes += sum(prev_positions[car_id] != current_positions[car_id] for car_id in shared)
+            position_changes += sum(
+                prev_positions[car_id] != current_positions[car_id] for car_id in shared
+            )
             total_transitions += len(shared)
         stability_ratio = 1.0 - position_changes / max(total_transitions, 1)
         metrics = run_output.get("metrics", {})
@@ -459,15 +510,18 @@ class PublicPrimitiveCalibrator:
     ) -> dict[str, float]:
         return {
             "overtake_rate_error": abs(
-                simulated_summary["overtake_rate_per_lap"] - actual_summary["position_gain_rate_per_lap"]
+                simulated_summary["overtake_rate_per_lap"]
+                - actual_summary["position_gain_rate_per_lap"]
             )
             / max(actual_summary["position_gain_rate_per_lap"], 0.25),
             "closing_speed_error": abs(
-                simulated_summary["closing_speed_proxy_kph"] - actual_summary["closing_speed_proxy_kph"]
+                simulated_summary["closing_speed_proxy_kph"]
+                - actual_summary["closing_speed_proxy_kph"]
             )
             / max(actual_summary["closing_speed_proxy_kph"], 5.0),
             "incident_rate_error": abs(
-                simulated_summary["incident_rate_per_lap"] - actual_summary["safety_event_rate_per_lap"]
+                simulated_summary["incident_rate_per_lap"]
+                - actual_summary["safety_event_rate_per_lap"]
             )
             / max(actual_summary["safety_event_rate_per_lap"], 0.1),
             "stability_error": abs(
@@ -510,8 +564,16 @@ class PublicPrimitiveCalibrator:
                     "rubber_level": 0.35,
                 },
             )
-        air_temp = float(weather["air_temperature"].mean()) if "air_temperature" in weather.columns else 25.0
-        track_temp = float(weather["track_temperature"].mean()) if "track_temperature" in weather.columns else air_temp + 8.0
+        air_temp = (
+            float(weather["air_temperature"].mean())
+            if "air_temperature" in weather.columns
+            else 25.0
+        )
+        track_temp = (
+            float(weather["track_temperature"].mean())
+            if "track_temperature" in weather.columns
+            else air_temp + 8.0
+        )
         rainfall = float(weather["rainfall"].mean()) if "rainfall" in weather.columns else 0.0
         wind_raw = float(weather["wind_speed"].mean()) if "wind_speed" in weather.columns else 7.2
         wind_speed_mps = wind_raw / 3.6 if wind_raw > 25.0 else wind_raw
@@ -567,7 +629,9 @@ class PublicPrimitiveCalibrator:
         }
 
     def _slug(self, query: SessionQuery, primitive: str) -> str:
-        return f"{primitive}_{query.track_id}_{query.year}_{query.session_type}".replace(" ", "_").lower()
+        return f"{primitive}_{query.track_id}_{query.year}_{query.session_type}".replace(
+            " ", "_"
+        ).lower()
 
     def _strip_weather_inputs(self, summary: dict[str, Any]) -> dict[str, Any]:
         cleaned = dict(summary)

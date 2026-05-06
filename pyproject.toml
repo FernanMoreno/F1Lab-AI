@@ -145,6 +145,9 @@ select = [
     "UP",  # pyupgrade
     "RUF", # ruff-specific rules
 ]
+ignore = [
+    "B008",  # typer.Option/Argument in defaults is the required typer pattern
+]
 
 [tool.mypy]
 python_version = "3.11"

@@ -124,21 +124,33 @@ class RaceMicrokernel:
         for car in cars:
             if car.retired:
                 car.lap = lap
-                lap_records.append({"car_id": car.car_id, "lap_time_s": float("inf"), "retired": True})
+                lap_records.append(
+                    {"car_id": car.car_id, "lap_time_s": float("inf"), "retired": True}
+                )
                 continue
 
             action = actions[car.car_id]
             tyre_model = TyreModel(compound=car.tyre_compound, max_laps=30)
-            tyre_grip = tyre_model.get_grip(car.tyre_age_laps, track_state.track_temp_c, weather.air_temp_c)
-            grip_factor = tyre_grip * max(0.6, track_state.grip_level - track_state.wetness_level * 0.15)
+            tyre_grip = tyre_model.get_grip(
+                car.tyre_age_laps, track_state.track_temp_c, weather.air_temp_c
+            )
+            grip_factor = tyre_grip * max(
+                0.6, track_state.grip_level - track_state.wetness_level * 0.15
+            )
             base_lap_time_s = track.length_m / max(track.avg_speed_kph / 3.6, 40.0)
             fuel_penalty = car.fuel_mass_kg * 0.014
             damage_penalty = car.damage * 1.9
-            condition_penalty = track_state.cooling_penalty * 3.0 + max(0.0, weather.wind_speed_mps - 5.0) * 0.05
+            condition_penalty = (
+                track_state.cooling_penalty * 3.0 + max(0.0, weather.wind_speed_mps - 5.0) * 0.05
+            )
             wet_penalty = track_state.wetness_level * 2.2
             grip_bonus = (1.0 - grip_factor) * 3.4
-            pace_bonus = PACE_BONUS.get(action.pace_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
-            ers_bonus = ERS_BONUS.get(action.ers_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
+            pace_bonus = (
+                PACE_BONUS.get(action.pace_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
+            )
+            ers_bonus = (
+                ERS_BONUS.get(action.ers_mode, 0.0) * self._battle_calibration["pace_delta_scale"]
+            )
             safety_penalty = 18.0 if safety_car_active else 0.0
             pit_penalty = self._pit_stop_penalty(track.track_id) if action.pit_this_lap else 0.0
             random_noise = float(self._rng.normal(0.0, 0.12))
@@ -157,13 +169,19 @@ class RaceMicrokernel:
             )
 
             ers_model = ERSModel(
-                max_energy_mj=float(self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0)),
-                max_deployment_kw=float(self._regulation.get("power_unit", {}).get("ers_deployment_max_kw", 250.0)),
+                max_energy_mj=float(
+                    self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0)
+                ),
+                max_deployment_kw=float(
+                    self._regulation.get("power_unit", {}).get("ers_deployment_max_kw", 250.0)
+                ),
                 efficiency=0.78,
             )
             deploy_kw, ers_state = ers_model.compute_deployment(
                 current_soc=car.ers_soc,
-                requested_kw=float(self._regulation.get("power_unit", {}).get("ers_deployment_max_kw", 250.0)),
+                requested_kw=float(
+                    self._regulation.get("power_unit", {}).get("ers_deployment_max_kw", 250.0)
+                ),
                 mode=action.ers_mode,
             )
 
@@ -202,7 +220,9 @@ class RaceMicrokernel:
             car.last_lap_time_s = lap_time
             car.cumulative_time_s += lap_time
             car.fuel_mass_kg = max(0.0, car.fuel_mass_kg - 1.65)
-            car.ers_soc = ers_state.soc if action.ers_mode != "charge" else min(1.0, ers_state.soc + 0.08)
+            car.ers_soc = (
+                ers_state.soc if action.ers_mode != "charge" else min(1.0, ers_state.soc + 0.08)
+            )
             car.tyre_age_laps = simulated_tyre.age_laps
             car.tyre_wear = simulated_tyre.wear
             car.aero_mode = action.aero_mode
@@ -257,7 +277,10 @@ class RaceMicrokernel:
                                     lap=lap,
                                     car_id=car.car_id,
                                     segment_id=segment.segment_id,
-                                    details={"surface": segment.runoff.type, "wheels_out": wheels_out},
+                                    details={
+                                        "surface": segment.runoff.type,
+                                        "wheels_out": wheels_out,
+                                    },
                                 )
                             )
             lap_records.append(
@@ -277,11 +300,27 @@ class RaceMicrokernel:
             old_position = car.position
             car.position = index
             leader_time = active_cars[0].cumulative_time_s + active_cars[0].penalties_s
-            ahead_time = active_cars[index - 2].cumulative_time_s + active_cars[index - 2].penalties_s if index > 1 else leader_time
-            behind_time = active_cars[index].cumulative_time_s + active_cars[index].penalties_s if index < len(active_cars) else car.cumulative_time_s + car.penalties_s
+            ahead_time = (
+                active_cars[index - 2].cumulative_time_s + active_cars[index - 2].penalties_s
+                if index > 1
+                else leader_time
+            )
+            behind_time = (
+                active_cars[index].cumulative_time_s + active_cars[index].penalties_s
+                if index < len(active_cars)
+                else car.cumulative_time_s + car.penalties_s
+            )
             car.gap_to_leader_s = max(0.0, (car.cumulative_time_s + car.penalties_s) - leader_time)
-            car.gap_ahead_s = 0.0 if index == 1 else max(0.0, (car.cumulative_time_s + car.penalties_s) - ahead_time)
-            car.gap_behind_s = 999.0 if index == len(active_cars) else max(0.0, behind_time - (car.cumulative_time_s + car.penalties_s))
+            car.gap_ahead_s = (
+                0.0
+                if index == 1
+                else max(0.0, (car.cumulative_time_s + car.penalties_s) - ahead_time)
+            )
+            car.gap_behind_s = (
+                999.0
+                if index == len(active_cars)
+                else max(0.0, behind_time - (car.cumulative_time_s + car.penalties_s))
+            )
 
             if old_position != car.position:
                 attacker = car if old_position > car.position else active_cars[index - 2]
@@ -294,14 +333,22 @@ class RaceMicrokernel:
                             - PACE_BONUS.get(actions[defender.car_id].pace_mode, 0.0)
                         )
                         * -60.0
-                        + (actions[attacker.car_id].risk_level - actions[defender.car_id].risk_level) * 40.0
+                        + (
+                            actions[attacker.car_id].risk_level
+                            - actions[defender.car_id].risk_level
+                        )
+                        * 40.0
                         + 20.0
                     )
                     * self._battle_calibration["closing_speed_scale"],
                 )
-                energy_delta_mj = (attacker.ers_soc - defender.ers_soc) * float(self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0))
+                energy_delta_mj = (attacker.ers_soc - defender.ers_soc) * float(
+                    self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0)
+                )
                 risk = self._risk_model.evaluate(
-                    segment=high_risk_segment if closing_speed_kph > segment.risk.unsafe_closing_speed_threshold_kph else segment,
+                    segment=high_risk_segment
+                    if closing_speed_kph > segment.risk.unsafe_closing_speed_threshold_kph
+                    else segment,
                     closing_speed_kph=closing_speed_kph,
                     energy_delta_mj=energy_delta_mj,
                     wetness_level=track_state.wetness_level,
@@ -318,7 +365,9 @@ class RaceMicrokernel:
                     "accident_risk": risk.accident_risk,
                     "recommended_failure_tags": risk.recommended_failure_tags,
                 }
-                adjusted_risk = min(1.0, risk.accident_risk * self._battle_calibration["incident_risk_scale"])
+                adjusted_risk = min(
+                    1.0, risk.accident_risk * self._battle_calibration["incident_risk_scale"]
+                )
                 details["accident_risk_adjusted"] = adjusted_risk
                 if adjusted_risk > 0.88:
                     event_type = "incident"
@@ -326,7 +375,10 @@ class RaceMicrokernel:
                         defender.damage = min(1.0, defender.damage + 0.22)
                         attacker.damage = min(1.0, attacker.damage + 0.14)
                         details["impact_severity"] = risk.impact_severity_estimate
-                        if risk.impact_severity_estimate == "critical" and self._rng.random() < 0.35:
+                        if (
+                            risk.impact_severity_estimate == "critical"
+                            and self._rng.random() < 0.35
+                        ):
                             defender.retired = True
                             details["retired_car"] = defender.car_id
                 events.append(
@@ -334,7 +386,9 @@ class RaceMicrokernel:
                         event_type=event_type,
                         lap=lap,
                         car_id=attacker.car_id,
-                        segment_id=(high_risk_segment if event_type == "incident" else segment).segment_id,
+                        segment_id=(
+                            high_risk_segment if event_type == "incident" else segment
+                        ).segment_id,
                         details=details,
                     )
                 )

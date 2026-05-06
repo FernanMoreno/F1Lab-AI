@@ -92,7 +92,8 @@ class CampaignSpec:
         track = data.get("track")
         tracks = data.get("tracks", [track] if track else ["suzuka"])
         return cls(
-            campaign_name=data.get("campaign_name") or data.get("experiment_name", "unnamed_campaign"),
+            campaign_name=data.get("campaign_name")
+            or data.get("experiment_name", "unnamed_campaign"),
             description=data.get("description", ""),
             regulation=data.get("regulation", "regulation_2026_refined"),
             tracks=list(tracks),
@@ -101,7 +102,9 @@ class CampaignSpec:
             mode=data.get("mode", data.get("agent_mode", "llm_event_driven")),
             seed=int(data.get("seed", data.get("simulation", {}).get("seed", 42))),
             scale_preset=data.get("scale_preset", "mini"),
-            repetitions=int(data.get("repetitions", data.get("simulation", {}).get("repetitions", 1))),
+            repetitions=int(
+                data.get("repetitions", data.get("simulation", {}).get("repetitions", 1))
+            ),
             conditions=conditions,
             enforcement=data.get("enforcement", {}),
             objectives=list(data.get("objectives", data.get("targets", []))),
@@ -120,7 +123,9 @@ class CampaignSpec:
         )
 
     @staticmethod
-    def _parse_conditions(conditions: dict[str, Any], forecast_data: dict[str, Any]) -> ConditionsScenario:
+    def _parse_conditions(
+        conditions: dict[str, Any], forecast_data: dict[str, Any]
+    ) -> ConditionsScenario:
         if isinstance(conditions, ConditionsScenario):
             return conditions
         nested_weather = conditions.get("weather", {})
@@ -133,8 +138,12 @@ class CampaignSpec:
         return ConditionsScenario(
             name=conditions.get("name", "inline"),
             weather=WeatherState(
-                air_temp_c=float(weather_source.get("air_temp_c", weather_source.get("air_temperature_c", 27.0))),
-                humidity_pct=float(weather_source.get("humidity_pct", weather_source.get("humidity_percent", 55.0))),
+                air_temp_c=float(
+                    weather_source.get("air_temp_c", weather_source.get("air_temperature_c", 27.0))
+                ),
+                humidity_pct=float(
+                    weather_source.get("humidity_pct", weather_source.get("humidity_percent", 55.0))
+                ),
                 pressure_hpa=float(weather_source.get("pressure_hpa", 1013.0)),
                 wind_speed_mps=float(weather_source.get("wind_speed_mps", 1.5)),
                 wind_direction_deg=float(weather_source.get("wind_direction_deg", 0.0)),
@@ -143,19 +152,29 @@ class CampaignSpec:
                 visibility_m=float(weather_source.get("visibility_m", 1000.0)),
             ),
             track=TrackState(
-                track_temp_c=float(track_source.get("track_temp_c", track_source.get("track_temperature_c", 35.0))),
+                track_temp_c=float(
+                    track_source.get("track_temp_c", track_source.get("track_temperature_c", 35.0))
+                ),
                 grip_level=float(track_source.get("grip_level", 0.97)),
                 rubber_level=float(track_source.get("rubber_level", 0.35)),
                 wetness_level=float(track_source.get("wetness_level", 0.0)),
                 standing_water_level=float(track_source.get("standing_water_level", 0.0)),
                 dirt_offline_level=float(track_source.get("dirt_offline_level", 0.2)),
                 drying_rate=float(track_source.get("drying_rate", 0.02)),
-                surface_evolution_rate=float(track_source.get("surface_evolution_rate", track_source.get("track_evolution_rate", 0.01))),
+                surface_evolution_rate=float(
+                    track_source.get(
+                        "surface_evolution_rate", track_source.get("track_evolution_rate", 0.01)
+                    )
+                ),
             ),
             forecast=ForecastState(
-                rain_expected_lap=forecast_source.get("rain_expected_lap", default.rain_expected_lap),
+                rain_expected_lap=forecast_source.get(
+                    "rain_expected_lap", default.rain_expected_lap
+                ),
                 confidence=float(forecast_source.get("confidence", default.confidence)),
-                rain_intensity_expected=forecast_source.get("rain_intensity_expected", default.rain_intensity_expected),
+                rain_intensity_expected=forecast_source.get(
+                    "rain_intensity_expected", default.rain_intensity_expected
+                ),
                 wind_warning=forecast_source.get("wind_warning", default.wind_warning),
                 track_crossover_estimate_lap=forecast_source.get(
                     "track_crossover_estimate_lap",
