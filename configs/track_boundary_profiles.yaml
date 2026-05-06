@@ -1,0 +1,248 @@
+schema_version: track_boundary_profiles.v1
+
+defaults:
+  base:
+    surface:
+      racing_line:
+        type: asphalt
+        grip_dry: 1.03
+        grip_wet: 0.76
+        roughness: 0.28
+        drainage: medium
+      offline:
+        type: asphalt
+        grip_dry: 0.9
+        grip_wet: 0.62
+        roughness: 0.34
+        drainage: medium
+        dirt_level: 0.2
+        marbles_level: 0.2
+    runoff:
+      outside:
+        type: asphalt
+        width_m: 10.0
+        grip_dry: 0.82
+        grip_wet: 0.54
+        rejoin_risk: medium
+        recovery_probability: medium
+    risk:
+      visibility_risk: medium
+  segment_types:
+    straight:
+      kerbs:
+        inside:
+          type: flat
+          height_mm: 18
+          width_m: 0.9
+          grip_dry: 0.9
+          grip_wet: 0.6
+          destabilization_factor: 0.04
+        outside:
+          type: flat
+          height_mm: 20
+          width_m: 1.0
+          grip_dry: 0.88
+          grip_wet: 0.56
+          destabilization_factor: 0.05
+      risk:
+        visibility_risk: low
+    fast_corner:
+      kerbs:
+        inside:
+          type: serrated
+          height_mm: 28
+          width_m: 1.1
+          grip_dry: 0.84
+          grip_wet: 0.5
+          destabilization_factor: 0.14
+        outside:
+          type: serrated
+          height_mm: 36
+          width_m: 1.3
+          grip_dry: 0.8
+          grip_wet: 0.44
+          destabilization_factor: 0.22
+          bottoming_risk: medium
+      risk:
+        active_aero_sensitivity: high
+    medium_corner:
+      kerbs:
+        inside:
+          type: flat
+          height_mm: 24
+          width_m: 1.0
+          grip_dry: 0.86
+          grip_wet: 0.52
+          destabilization_factor: 0.1
+        outside:
+          type: serrated
+          height_mm: 32
+          width_m: 1.2
+          grip_dry: 0.8
+          grip_wet: 0.45
+          destabilization_factor: 0.18
+      track_limits:
+        rule: white_line
+        allowed_wheels_out: 0
+        detection_probability: 0.97
+        warning_threshold: 3
+        penalty_after: 4
+        time_gain_sensitive: true
+        estimated_gain_if_abused_s: 0.03
+    slow_corner:
+      kerbs:
+        inside:
+          type: flat
+          height_mm: 26
+          width_m: 1.1
+          grip_dry: 0.84
+          grip_wet: 0.48
+          destabilization_factor: 0.12
+        outside:
+          type: serrated
+          height_mm: 34
+          width_m: 1.2
+          grip_dry: 0.78
+          grip_wet: 0.42
+          destabilization_factor: 0.2
+      track_limits:
+        rule: white_line
+        allowed_wheels_out: 0
+        detection_probability: 0.985
+        warning_threshold: 3
+        penalty_after: 4
+        time_gain_sensitive: true
+        estimated_gain_if_abused_s: 0.04
+    braking_zone:
+      runoff:
+        outside:
+          type: asphalt
+          width_m: 14.0
+          grip_dry: 0.8
+          grip_wet: 0.5
+          rejoin_risk: medium
+          recovery_probability: medium
+      track_limits:
+        rule: white_line
+        allowed_wheels_out: 0
+        detection_probability: 0.985
+        warning_threshold: 3
+        penalty_after: 4
+        time_gain_sensitive: true
+        estimated_gain_if_abused_s: 0.05
+
+track_families:
+  long_straight_street:
+    base:
+      surface:
+        offline:
+          type: painted_asphalt
+          grip_dry: 0.84
+          grip_wet: 0.46
+          roughness: 0.28
+          drainage: low
+          dirt_level: 0.22
+          marbles_level: 0.28
+      runoff:
+        outside:
+          type: wall_close
+          width_m: 3.0
+          grip_dry: 0.24
+          grip_wet: 0.12
+          rejoin_risk: high
+          recovery_probability: low
+      risk:
+        barrier_distance_m: 11.0
+        impact_severity_multiplier: 1.3
+        visibility_risk: medium
+    segment_types:
+      straight:
+        risk:
+          unsafe_closing_speed_threshold_kph: 62.0
+      braking_zone:
+        runoff:
+          outside:
+            width_m: 7.0
+        risk:
+          side_by_side_risk: high
+  narrow_street:
+    base:
+      surface:
+        offline:
+          type: painted_asphalt
+          grip_dry: 0.8
+          grip_wet: 0.42
+          roughness: 0.3
+          drainage: low
+          dirt_level: 0.18
+          marbles_level: 0.2
+      runoff:
+        outside:
+          type: wall_close
+          width_m: 2.0
+          grip_dry: 0.18
+          grip_wet: 0.08
+          rejoin_risk: high
+          recovery_probability: low
+      risk:
+        barrier_distance_m: 7.0
+        impact_severity_multiplier: 1.45
+        visibility_risk: high
+    segment_types:
+      slow_corner:
+        kerbs:
+          inside:
+            type: flat
+            height_mm: 18
+            width_m: 0.8
+            grip_dry: 0.82
+            grip_wet: 0.46
+            destabilization_factor: 0.08
+          outside:
+            type: flat
+            height_mm: 20
+            width_m: 0.9
+            grip_dry: 0.78
+            grip_wet: 0.4
+            destabilization_factor: 0.1
+        risk:
+          evasive_action_margin: low
+          side_by_side_risk: critical
+      straight:
+        runoff:
+          outside:
+            width_m: 3.0
+  cooling_limited_street:
+    base:
+      surface:
+        offline:
+          type: painted_asphalt
+          grip_dry: 0.83
+          grip_wet: 0.44
+          roughness: 0.32
+          drainage: low
+          dirt_level: 0.2
+          marbles_level: 0.24
+      runoff:
+        outside:
+          type: wall_close
+          width_m: 2.5
+          grip_dry: 0.22
+          grip_wet: 0.1
+          rejoin_risk: high
+          recovery_probability: low
+      risk:
+        barrier_distance_m: 9.0
+        impact_severity_multiplier: 1.38
+        visibility_risk: medium
+    segment_types:
+      straight:
+        risk:
+          unsafe_closing_speed_threshold_kph: 50.0
+      braking_zone:
+        runoff:
+          outside:
+            width_m: 6.0
+      medium_corner:
+        risk:
+          active_aero_sensitivity: medium

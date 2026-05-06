@@ -31,6 +31,7 @@ from reglabsim.logging.replay import ReplayEngine
 from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
 from reglabsim.track.builder import GeospatialTrackBuilder
+from reglabsim.track.enrichment import TrackBoundaryProfileEnricher
 from reglabsim.track.track_loader import TrackRepository
 from reglabsim.validation.primitives import PublicPrimitiveCalibrator
 from reglabsim.validation.public_session import PublicSessionValidator
@@ -66,6 +67,7 @@ class SimulationFacadeImpl:
         self._unified_data_source: UnifiedDataSource | None = None
         self._openmeteo_client: OpenMeteoClient | None = None
         self._metric_registry = MetricRegistryImpl()
+        self._boundary_enricher: TrackBoundaryProfileEnricher | None = None
 
     # ------------------------------------------------------------------
     # Registry loading
@@ -165,6 +167,13 @@ class SimulationFacadeImpl:
         return GeospatialTrackBuilder(
             self._config_dir / "tracks", weather_client=self._weather_source()
         )
+
+    def _track_boundary_enricher(self) -> TrackBoundaryProfileEnricher:
+        if self._boundary_enricher is None:
+            self._boundary_enricher = TrackBoundaryProfileEnricher(
+                self._config_dir / "track_boundary_profiles.yaml"
+            )
+        return self._boundary_enricher
 
     def _primitive_calibrator(self, data_root: str = "data") -> PublicPrimitiveCalibrator:
         self._ensure_regulations_loaded()
@@ -364,6 +373,7 @@ class SimulationFacadeImpl:
         name: str,
         country: str,
         source_kind: str,
+        track_family: str | None = None,
         seed_path: str | Path | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
@@ -387,6 +397,8 @@ class SimulationFacadeImpl:
             metadata["latitude"] = latitude
         if longitude is not None:
             metadata["longitude"] = longitude
+        if track_family:
+            metadata["track_family"] = track_family
         builder = self._track_builder()
         if source_kind == "csv":
             if seed_path is None:
@@ -430,9 +442,24 @@ class SimulationFacadeImpl:
                 fidelity_level=fidelity_level,
                 validation_status="generated_seed",
             )
+        elif source_kind == "osm_street":
+            if latitude is None or longitude is None:
+                raise ValueError("latitude and longitude are required for source_kind='osm_street'")
+            payload = builder.build_from_osm_street(
+                track_id=track_id,
+                metadata=metadata,
+                latitude=latitude,
+                longitude=longitude,
+                turns=turns,
+                laps=laps,
+                race_distance_m=race_distance_m,
+                fidelity_level=fidelity_level,
+                validation_status="generated_seed",
+            )
         else:
             raise ValueError(f"Unsupported source_kind '{source_kind}'")
 
+        payload = self._track_boundary_enricher().enrich_payload(payload)
         saved_path = builder.save_yaml(payload, output_path)
         summary = {
             "track_id": payload["track_id"],
@@ -470,6 +497,7 @@ class SimulationFacadeImpl:
         output_root.mkdir(parents=True, exist_ok=True)
         results: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
         for track_id in targets:
             track = self._track_repo.get(track_id)
             if source_kind != "osm":
@@ -482,6 +510,7 @@ class SimulationFacadeImpl:
                     name=track.name,
                     country=track.country,
                     source_kind="osm",
+                    track_family=str(track.metadata.get("track_family", "")) or None,
                     latitude=latitude,
                     longitude=longitude,
                     turns=track.turns,
@@ -494,6 +523,70 @@ class SimulationFacadeImpl:
                 )
                 coverage_ratio = result["summary"]["metadata"].get("length_coverage_ratio")
                 if coverage_ratio is not None and float(coverage_ratio) < 0.5:
+                    if self._is_street_track(track):
+                        try:
+                            street_result = self.build_track_seed(
+                                track_id=track_id,
+                                name=track.name,
+                                country=track.country,
+                                source_kind="osm_street",
+                                track_family=str(track.metadata.get("track_family", "")) or None,
+                                latitude=latitude,
+                                longitude=longitude,
+                                turns=track.turns,
+                                laps=track.laps,
+                                race_distance_m=track.race_distance_m,
+                                avg_speed_kph=track.avg_speed_kph,
+                                fidelity_level=fidelity_level,
+                                output_path=output_root / f"{track_id}.yaml",
+                                sources=[
+                                    "osm_street_network",
+                                    "openmeteo_elevation",
+                                    "generated_seed",
+                                ],
+                            )
+                            street_coverage = street_result["summary"]["metadata"].get(
+                                "length_coverage_ratio"
+                            )
+                            if street_coverage is not None and float(street_coverage) >= 0.5:
+                                street_result["fallback_used"] = False
+                                street_result["street_builder_used"] = True
+                                results.append(street_result)
+                                warnings.append(
+                                    {
+                                        "track_id": track_id,
+                                        "message": (
+                                            f"Raceway coverage ratio {coverage_ratio:.3f}; "
+                                            f"street-network builder used with coverage "
+                                            f"{float(street_coverage):.3f}"
+                                        ),
+                                        "saved_path": result["saved_path"],
+                                        "street_saved_path": street_result["saved_path"],
+                                    }
+                                )
+                                continue
+                            failures.append(
+                                {
+                                    "track_id": track_id,
+                                    "error": (
+                                        f"Raceway coverage ratio {coverage_ratio:.3f}; "
+                                        f"street-network coverage too low: {street_coverage}"
+                                    ),
+                                    "saved_path": result["saved_path"],
+                                    "street_saved_path": street_result["saved_path"],
+                                }
+                            )
+                        except Exception as street_exc:
+                            failures.append(
+                                {
+                                    "track_id": track_id,
+                                    "error": (
+                                        f"Raceway coverage ratio {coverage_ratio:.3f}; "
+                                        f"street-network builder failed: {street_exc}"
+                                    ),
+                                    "saved_path": result["saved_path"],
+                                }
+                            )
                     fallback_payload = self._track_builder().build_from_track_model(
                         track,
                         fallback_reason=f"OSM coverage ratio {coverage_ratio:.3f} below threshold.",
@@ -545,9 +638,15 @@ class SimulationFacadeImpl:
             "output_dir": str(output_root),
             "track_count": len(results),
             "failure_count": len(failures),
+            "warning_count": len(warnings),
             "tracks": results,
+            "warnings": warnings,
             "failures": failures,
         }
+
+    def _is_street_track(self, track: Any) -> bool:
+        family = str(track.metadata.get("track_family", "")).lower()
+        return "street" in family or track.track_id in {"baku", "monaco", "singapore"}
 
     def calibrate_public_lap(
         self,

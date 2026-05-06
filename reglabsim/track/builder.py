@@ -677,7 +677,7 @@ class GeospatialTrackBuilder:
         street_mode: bool = False,
     ) -> tuple[list[TrackPoint], dict[str, Any]]:
         query = (
-            f"[out:json][timeout:25];("
+            "[out:json][timeout:25];("
             + (
                 f'way["highway"~"{STREET_HIGHWAY_PATTERN}"](around:{search_radius_m},{latitude},{longitude});'
                 if street_mode
@@ -709,7 +709,10 @@ class GeospatialTrackBuilder:
                         center_longitude=longitude,
                         search_radius_m=search_radius_m,
                     )
-                return self._points_from_overpass_payload(payload, expected_length_m=expected_length_m)
+                return self._points_from_overpass_payload(
+                    payload,
+                    expected_length_m=expected_length_m,
+                )
             except (HTTPError, URLError, TimeoutError) as exc:
                 last_error = exc
                 if attempt < 2:
@@ -879,7 +882,9 @@ class GeospatialTrackBuilder:
             "osm_cycle_length_m": round(cycle_length_m, 3),
             "osm_target_length_m": expected_length_m,
             "osm_search_kind": "street_network",
-            "osm_auxiliary_way_count": sum(1 for way in selected if self._is_auxiliary_way(way.tags)),
+            "osm_auxiliary_way_count": sum(
+                1 for way in selected if self._is_auxiliary_way(way.tags)
+            ),
         }
         return merged, metadata
 
@@ -942,6 +947,72 @@ class GeospatialTrackBuilder:
         scored.sort(key=lambda item: item[0])
         return scored[0][1]
 
+    def _select_street_way_subset(
+        self,
+        ways: list[OSMWay],
+        *,
+        center: TrackPoint,
+        search_radius_m: int,
+        expected_length_m: float | None,
+    ) -> list[OSMWay]:
+        scored: list[tuple[float, OSMWay]] = []
+        for way in ways:
+            centroid = self._polyline_centroid(way.points)
+            center_distance = self._distance_m(center, centroid)
+            if center_distance > search_radius_m * 1.3:
+                continue
+            priority = self._street_way_priority(way.tags)
+            score = center_distance + priority * 250.0
+            if self._is_auxiliary_way(way.tags):
+                score += 75.0
+            scored.append((score, way))
+        scored.sort(key=lambda item: (item[0], -item[1].length_m))
+        if not scored:
+            raise ValueError("Street-network builder could not score any usable ways")
+        selected: list[OSMWay] = []
+        accumulated_length = 0.0
+        target_budget = (
+            expected_length_m * 1.8
+            if expected_length_m is not None and expected_length_m > 0.0
+            else 8_000.0
+        )
+        for _, way in scored[:MAX_STREET_COMPONENT_WAYS]:
+            selected.append(way)
+            accumulated_length += way.length_m
+            if accumulated_length >= target_budget and len(selected) >= 12:
+                break
+        return selected
+
+    def _select_street_component(
+        self,
+        components: list[list[OSMWay]],
+        *,
+        center: TrackPoint,
+        expected_length_m: float | None,
+    ) -> list[OSMWay]:
+        scored: list[tuple[float, list[OSMWay]]] = []
+        for component in components:
+            length_m = sum(way.length_m for way in component)
+            centroid_distances = [
+                self._distance_m(center, self._polyline_centroid(way.points))
+                for way in component
+            ]
+            mean_center_distance = (
+                sum(centroid_distances) / len(centroid_distances) if centroid_distances else 9999.0
+            )
+            if expected_length_m is None or expected_length_m <= 0.0:
+                relative_error = 0.0
+            else:
+                relative_error = abs(length_m - expected_length_m) / expected_length_m
+            score = (
+                relative_error
+                + (mean_center_distance / 1_000.0)
+                - min(len(component), 200) / 20_000.0
+            )
+            scored.append((score, component))
+        scored.sort(key=lambda item: item[0])
+        return scored[0][1]
+
     def _assemble_osm_component(
         self,
         ways: list[OSMWay],
@@ -949,23 +1020,10 @@ class GeospatialTrackBuilder:
     ) -> list[TrackPoint]:
         if not ways:
             raise ValueError("No OSM ways available for assembly")
-        node_refs: list[TrackPoint] = []
-
-        def assign_node(point: TrackPoint) -> int:
-            for node_index, reference in enumerate(node_refs):
-                if self._distance_m(point, reference) <= node_threshold_m:
-                    return node_index
-            node_refs.append(point)
-            return len(node_refs) - 1
-
-        edges: list[tuple[int, int, OSMWay]] = []
-        adjacency: dict[int, list[int]] = {}
-        for edge_index, way in enumerate(ways):
-            start_node = assign_node(way.points[0])
-            end_node = assign_node(way.points[-1])
-            edges.append((start_node, end_node, way))
-            adjacency.setdefault(start_node, []).append(edge_index)
-            adjacency.setdefault(end_node, []).append(edge_index)
+        edges, adjacency = self._build_osm_edge_graph(
+            ways,
+            node_threshold_m=node_threshold_m,
+        )
 
         degree_one_nodes = [node for node, edge_ids in adjacency.items() if len(edge_ids) == 1]
         if degree_one_nodes:
@@ -995,6 +1053,114 @@ class GeospatialTrackBuilder:
         if len(stitched) > 3 and self._distance_m(stitched[0], stitched[-1]) > 25.0:
             stitched.append(stitched[0])
         return self._downsample_points(stitched)
+
+    def _build_osm_edge_graph(
+        self,
+        ways: list[OSMWay],
+        *,
+        node_threshold_m: float,
+    ) -> tuple[list[tuple[int, int, OSMWay]], dict[int, list[int]]]:
+        node_refs: list[TrackPoint] = []
+
+        def assign_node(point: TrackPoint) -> int:
+            for node_index, reference in enumerate(node_refs):
+                if self._distance_m(point, reference) <= node_threshold_m:
+                    return node_index
+            node_refs.append(point)
+            return len(node_refs) - 1
+
+        edges: list[tuple[int, int, OSMWay]] = []
+        adjacency: dict[int, list[int]] = {}
+        for edge_index, way in enumerate(ways):
+            start_node = assign_node(way.points[0])
+            end_node = assign_node(way.points[-1])
+            edges.append((start_node, end_node, way))
+            adjacency.setdefault(start_node, []).append(edge_index)
+            adjacency.setdefault(end_node, []).append(edge_index)
+        return edges, adjacency
+
+    def _find_best_osm_cycle(
+        self,
+        ways: list[OSMWay],
+        *,
+        expected_length_m: float | None,
+        node_threshold_m: float,
+    ) -> list[tuple[int, bool, OSMWay]] | None:
+        if not ways or expected_length_m is None or expected_length_m <= 0.0:
+            return None
+        edges, adjacency = self._build_osm_edge_graph(ways, node_threshold_m=node_threshold_m)
+        start_edges = sorted(
+            range(len(edges)),
+            key=lambda index: edges[index][2].length_m,
+            reverse=True,
+        )[: min(len(edges), 20)]
+        best_ordered: list[tuple[int, bool, OSMWay]] | None = None
+        best_score = float("inf")
+        explored_states = 0
+        max_states = 4000
+        max_depth = min(max(len(edges) + 6, 8), 60)
+
+        def explore(
+            start_node: int,
+            current_node: int,
+            length_m: float,
+            ordered: list[tuple[int, bool, OSMWay]],
+            used: set[int],
+        ) -> None:
+            nonlocal best_ordered, best_score, explored_states
+            explored_states += 1
+            if explored_states > max_states or len(ordered) > max_depth:
+                return
+            if (
+                current_node == start_node
+                and len(ordered) >= 3
+                and length_m >= expected_length_m * 0.55
+            ):
+                score = abs(length_m - expected_length_m) / expected_length_m
+                if score < best_score:
+                    best_score = score
+                    best_ordered = list(ordered)
+                return
+            if length_m > expected_length_m * 1.35:
+                return
+            candidates: list[tuple[float, int, bool, int, OSMWay]] = []
+            for edge_id in adjacency.get(current_node, []):
+                if edge_id in used:
+                    continue
+                edge_start, edge_end, way = edges[edge_id]
+                forward = edge_start == current_node
+                next_node = edge_end if forward else edge_start
+                projected = length_m + way.length_m
+                candidates.append(
+                    (
+                        abs(expected_length_m - projected),
+                        edge_id,
+                        forward,
+                        next_node,
+                        way,
+                    )
+                )
+            candidates.sort(key=lambda item: (item[0], -item[4].length_m))
+            for _, edge_id, forward, next_node, way in candidates[:4]:
+                ordered.append((edge_id, forward, way))
+                used.add(edge_id)
+                explore(start_node, next_node, length_m + way.length_m, ordered, used)
+                used.remove(edge_id)
+                ordered.pop()
+
+        for start_edge in start_edges:
+            edge_start, edge_end, way = edges[start_edge]
+            for start_node in (edge_start, edge_end):
+                forward = edge_start == start_node
+                next_node = edge_end if forward else edge_start
+                explore(
+                    start_node,
+                    next_node,
+                    way.length_m,
+                    [(start_edge, forward, way)],
+                    {start_edge},
+                )
+        return best_ordered
 
     def _walk_osm_edges(
         self,
@@ -1186,10 +1352,63 @@ class GeospatialTrackBuilder:
             "estimated_gain_if_abused_s": limits.estimated_gain_if_abused_s,
         }
 
+    def _polyline_centroid(self, points: list[TrackPoint]) -> TrackPoint:
+        if not points:
+            raise ValueError("Polyline requires at least one point")
+        if all(point.latitude is not None and point.longitude is not None for point in points):
+            return TrackPoint(
+                latitude=sum(point.latitude for point in points if point.latitude is not None)
+                / len(points),
+                longitude=sum(point.longitude for point in points if point.longitude is not None)
+                / len(points),
+            )
+        if all(point.x_m is not None and point.y_m is not None for point in points):
+            return TrackPoint(
+                x_m=sum(point.x_m for point in points if point.x_m is not None) / len(points),
+                y_m=sum(point.y_m for point in points if point.y_m is not None) / len(points),
+            )
+        return points[len(points) // 2]
+
+    def _clip_polyline_to_radius(
+        self,
+        points: list[TrackPoint],
+        *,
+        center: TrackPoint,
+        max_radius_m: float,
+    ) -> list[TrackPoint]:
+        kept = [point for point in points if self._distance_m(center, point) <= max_radius_m]
+        if len(kept) >= 2:
+            return kept
+        return points
+
+    def _street_way_priority(self, tags: dict[str, Any]) -> float:
+        highway = str(tags.get("highway", "")).strip().lower()
+        return STREET_HIGHWAY_PRIORITY.get(highway, 1.0)
+
+    def _is_street_candidate(self, tags: dict[str, Any]) -> bool:
+        highway = str(tags.get("highway", "")).strip().lower()
+        if highway not in STREET_HIGHWAY_PRIORITY:
+            return False
+        access = str(tags.get("access", "")).strip().lower()
+        if access == "private":
+            return False
+        service = str(tags.get("service", "")).strip().lower()
+        if service in {"parking_aisle", "driveway", "alley"}:
+            return False
+        if str(tags.get("area", "")).strip().lower() == "yes":
+            return False
+        return True
+
     def _is_auxiliary_way(self, tags: dict[str, Any]) -> bool:
         name = str(tags.get("name", "")).strip().lower()
+        highway = str(tags.get("highway", "")).strip().lower()
         service = str(tags.get("service", "")).strip().lower()
-        return "pit lane" in name or service == "pit_lane"
+        return (
+            "pit lane" in name
+            or service == "pit_lane"
+            or service in {"parking_aisle", "driveway", "alley"}
+            or (highway in {"living_street"} and "circuit" not in name)
+        )
 
     def _expected_length_from_metadata(self, metadata: dict[str, Any]) -> float | None:
         candidate = metadata.get("target_length_m")
