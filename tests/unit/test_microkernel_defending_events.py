@@ -152,11 +152,131 @@ def test_microkernel_emits_forcing_off_track_event() -> None:
 
     assert forcing_events
     assert forcing_events[0].car_id == "car_01"
-    assert forcing_events[0].details["recommended_failure_tags"] == [
-        "forcing_off_track_exploit"
-    ]
+    assert "forcing_off_track_exploit" in forcing_events[0].details["recommended_failure_tags"]
     assert forcing_events[0].details["slipstream_gain_mps"] > 0.0
     assert forcing_events[0].details["battle_distance_m"] >= 4.0
+
+
+def test_microkernel_tags_late_braking_move_and_multiple_defensive_moves() -> None:
+    microkernel = RaceMicrokernel(
+        regulation={"power_unit": {"ers_max_energy_mj": 6.0, "ers_deployment_max_kw": 250.0}},
+        seed=9,
+    )
+    track = TrackModel(
+        track_id="test_braking",
+        name="Test Braking",
+        country="Nowhere",
+        length_m=900.0,
+        turns=1,
+        laps=5,
+        race_distance_m=4500.0,
+        avg_speed_kph=165.0,
+        fidelity_level=2,
+        segments=[
+            TrackSegment(
+                segment_id="t1_braking",
+                name="T1 Braking",
+                segment_type="braking_zone",
+                start_m=0.0,
+                end_m=900.0,
+                width_m=9.5,
+                overtaking_viability="high",
+                preferred_battle_zone=True,
+                runoff=RunoffProfile(
+                    type="asphalt",
+                    width_m=3.0,
+                    grip_dry=0.7,
+                    grip_wet=0.4,
+                    rejoin_risk="medium",
+                ),
+                risk=SegmentRiskProfile(
+                    unsafe_closing_speed_threshold_kph=42.0,
+                    side_by_side_risk="high",
+                    evasive_action_margin="high",
+                    energy_delta_sensitivity="high",
+                    barrier_distance_m=15.0,
+                ),
+            )
+        ],
+    )
+    weather = WeatherState(
+        air_temp_c=27.0,
+        humidity_pct=58.0,
+        pressure_hpa=1011.0,
+        wind_speed_mps=1.5,
+        wind_direction_deg=0.0,
+        rain_intensity_mm_h=0.0,
+        cloud_cover_pct=18.0,
+        visibility_m=1000.0,
+    )
+    track_state = TrackState(
+        track_temp_c=34.0,
+        grip_level=0.97,
+        rubber_level=0.36,
+        wetness_level=0.0,
+        standing_water_level=0.0,
+        dirt_offline_level=0.12,
+        drying_rate=0.02,
+        surface_evolution_rate=0.01,
+    )
+    cars = [
+        _car(car_id="car_01", position=1, cumulative_time_s=89.8, ers_soc=0.5),
+        _car(car_id="car_02", position=2, cumulative_time_s=90.02, ers_soc=0.88),
+    ]
+    actions = {
+        "car_01": RaceAction(
+            schema_version=RACE_ACTION_SCHEMA,
+            car_id="car_01",
+            lap=1,
+            pace_mode="conserve",
+            ers_mode="hybrid",
+            aero_mode="straight",
+            attack=False,
+            defend=True,
+            pit_this_lap=False,
+            risk_level=0.88,
+            source_mode="test",
+            note="late squeeze",
+        ),
+        "car_02": RaceAction(
+            schema_version=RACE_ACTION_SCHEMA,
+            car_id="car_02",
+            lap=1,
+            pace_mode="attack",
+            ers_mode="boost",
+            aero_mode="straight",
+            attack=True,
+            defend=False,
+            pit_this_lap=False,
+            risk_level=0.84,
+            source_mode="test",
+            note="attack braking zone",
+        ),
+    }
+
+    _, events, _ = microkernel.resolve_lap(
+        lap=1,
+        total_laps=5,
+        cars=cars,
+        actions=actions,
+        track=track,
+        weather=weather,
+        track_state=track_state,
+        safety_car_active=False,
+    )
+
+    defending_events = [
+        event
+        for event in events
+        if event.event_type in {"unsafe_defending", "forcing_off_track"}
+    ]
+
+    assert defending_events
+    tags = defending_events[0].details["recommended_failure_tags"]
+    assert "late_move_under_braking_exploit" in tags
+    assert "multiple_defensive_moves_exploit" in tags
+    assert defending_events[0].details["late_move_under_braking"] is True
+    assert defending_events[0].details["line_change_count"] >= 2
 
 
 def test_microkernel_battle_event_exposes_slipstream_and_dirty_air() -> None:

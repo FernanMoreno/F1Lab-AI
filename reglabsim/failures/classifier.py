@@ -244,8 +244,14 @@ class FailureClassifier:
     def _repeatability(self, failure_type: str, event: dict[str, Any]) -> float:
         if failure_type in {"track_limits_exploit", "grey_area_exploit"}:
             return 0.78
-        if failure_type in {"unsafe_defending_exploit", "forcing_off_track_exploit"}:
+        if failure_type in {
+            "unsafe_defending_exploit",
+            "forcing_off_track_exploit",
+            "multiple_defensive_moves_exploit",
+        }:
             return 0.66
+        if failure_type == "late_move_under_braking_exploit":
+            return 0.58
         if event.get("event_type") == "incident":
             return 0.55
         return 0.72
@@ -257,6 +263,10 @@ class FailureClassifier:
             return 0.72
         if failure_type == "forcing_off_track_exploit":
             return 0.62
+        if failure_type == "late_move_under_braking_exploit":
+            return 0.57
+        if failure_type == "multiple_defensive_moves_exploit":
+            return 0.74
         if "weather" in failure_type:
             return 0.45
         if failure_type in {"track_limits_exploit", "battery_dominance"}:
@@ -270,6 +280,8 @@ class FailureClassifier:
             "grey_area_exploit",
             "unsafe_defending_exploit",
             "forcing_off_track_exploit",
+            "late_move_under_braking_exploit",
+            "multiple_defensive_moves_exploit",
         }:
             return "high"
         return "medium"
@@ -277,6 +289,10 @@ class FailureClassifier:
     def _safety_impact(self, failure_type: str) -> str:
         if failure_type == "forcing_off_track_exploit":
             return "critical"
+        if failure_type == "late_move_under_braking_exploit":
+            return "critical"
+        if failure_type == "multiple_defensive_moves_exploit":
+            return "high"
         if "unsafe" in failure_type or "no_escape" in failure_type:
             return "critical"
         if failure_type in {"wind_active_aero_instability", "weather_amplified_failure"}:
@@ -307,6 +323,8 @@ class FailureClassifier:
             "no_escape_zone_failure": "overtake_mode_activation_gap_s",
             "unsafe_defending_exploit": "defending_space_requirement_m",
             "forcing_off_track_exploit": "defending_space_requirement_m",
+            "late_move_under_braking_exploit": "braking_zone_defending_window_m",
+            "multiple_defensive_moves_exploit": "max_defensive_moves_per_straight",
             "grey_area_exploit": "steward_adjudication_window",
         }
         return mapping.get(failure_type, "regulation_2026_behavior")

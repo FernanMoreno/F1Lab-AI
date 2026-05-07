@@ -14,6 +14,8 @@ FAILURE_TYPES = {
     "unsafe_rejoin_exploit",
     "unsafe_defending_exploit",
     "forcing_off_track_exploit",
+    "late_move_under_braking_exploit",
+    "multiple_defensive_moves_exploit",
     "wind_active_aero_instability",
     "weather_amplified_failure",
     "no_escape_zone_failure",

@@ -372,6 +372,11 @@ class StewardEngine:
             return None
 
         evidence_score = self._defending_evidence_score(event.details)
+        aggravating_factors = self._defending_aggravators(event.details)
+        if "late_move_under_braking" in aggravating_factors:
+            evidence_score = round(min(1.0, evidence_score + 0.08), 3)
+        if "multiple_defensive_moves" in aggravating_factors:
+            evidence_score = round(min(1.0, evidence_score + 0.06), 3)
         grey_area_score = self._grey_area_score(
             event=event,
             evidence_score=evidence_score,
@@ -408,6 +413,12 @@ class StewardEngine:
             elif evidence_score < 0.55:
                 return None
 
+        if aggravating_factors and decision_type == warning_type:
+            decision_type = penalty_type
+            penalty = self._penalty_seconds(penalty_type) * 0.5 * strictness
+        elif aggravating_factors and penalty > 0.0:
+            penalty *= 1.15 if "late_move_under_braking" in aggravating_factors else 1.08
+
         details = {
             **event.details,
             "source_event_type": event.event_type,
@@ -416,6 +427,7 @@ class StewardEngine:
             "detection_probability_adjusted": detection_probability,
             "evidence_score": evidence_score,
             "grey_area_score": grey_area_score,
+            "aggravating_factors": aggravating_factors,
             "visibility_m": visibility_m,
             "rain_intensity_mm_h": rain_intensity_mm_h,
         }
@@ -538,6 +550,8 @@ class StewardEngine:
         closing_speed = float(details.get("closing_speed_kph", 0.0))
         room_margin = float(details.get("available_room_margin_m", 1.5))
         runoff_risk = self._risk_numeric(str(details.get("runoff_risk", "medium")))
+        line_change_count = max(1, int(details.get("line_change_count", 1)))
+        late_move_probability = float(details.get("late_move_probability", 0.0))
         return round(
             min(
                 1.0,
@@ -545,10 +559,36 @@ class StewardEngine:
                 + battle_pressure * 0.4
                 + min(0.18, max(0.0, (closing_speed - 20.0) / 55.0))
                 + runoff_risk * 0.12
-                + max(0.0, 1.0 - min(room_margin, 1.6) / 1.6) * 0.18,
+                + max(0.0, 1.0 - min(room_margin, 1.6) / 1.6) * 0.18
+                + min(0.14, max(0, line_change_count - 1) * 0.07)
+                + min(0.08, late_move_probability * 0.08)
             ),
             3,
         )
+
+    def _defending_aggravators(self, details: dict[str, Any]) -> list[str]:
+        factors: list[str] = []
+        segment_type = str(details.get("segment_type", ""))
+        braking_zone_like = segment_type in {"braking_zone", "hairpin", "chicane", "corner"}
+        line_change_count = max(1, int(details.get("line_change_count", 1)))
+        late_move_probability = float(details.get("late_move_probability", 0.0))
+        closing_speed = float(details.get("closing_speed_kph", 0.0))
+
+        if (
+            braking_zone_like
+            and closing_speed >= 35.0
+            and (
+                bool(details.get("late_move_under_braking"))
+                or late_move_probability >= 0.72
+            )
+        ):
+            factors.append("late_move_under_braking")
+        if (
+            line_change_count >= 2
+            or bool(details.get("multiple_defensive_moves_suspected"))
+        ):
+            factors.append("multiple_defensive_moves")
+        return factors
 
     def _grey_area_score(
         self,

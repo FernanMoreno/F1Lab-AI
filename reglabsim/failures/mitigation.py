@@ -82,7 +82,12 @@ class MitigationEngine:
                 }
             )
 
-        if counts.get("unsafe_defending_exploit", 0) or counts.get("forcing_off_track_exploit", 0):
+        if (
+            counts.get("unsafe_defending_exploit", 0)
+            or counts.get("forcing_off_track_exploit", 0)
+            or counts.get("late_move_under_braking_exploit", 0)
+            or counts.get("multiple_defensive_moves_exploit", 0)
+        ):
             candidates.append(
                 {
                     "name": "tighten_defending_enforcement",
@@ -90,6 +95,8 @@ class MitigationEngine:
                     "failure_targets": [
                         "unsafe_defending_exploit",
                         "forcing_off_track_exploit",
+                        "late_move_under_braking_exploit",
+                        "multiple_defensive_moves_exploit",
                         "grey_area_exploit",
                     ],
                     "regulation_overrides": {},
@@ -118,6 +125,7 @@ class MitigationEngine:
                     "failure_targets": [
                         "unsafe_defending_exploit",
                         "forcing_off_track_exploit",
+                        "multiple_defensive_moves_exploit",
                     ],
                     "regulation_overrides": {
                         "sporting": {
@@ -134,6 +142,41 @@ class MitigationEngine:
                     "expected_tradeoffs": [
                         "cleaner side-by-side exits",
                         "less ambiguous defending",
+                    ],
+                }
+            )
+            candidates.append(
+                {
+                    "name": "ban_reactive_braking_moves",
+                    "description": (
+                        "Freeze defending line earlier into braking zones and "
+                        "penalize weaving"
+                    ),
+                    "failure_targets": [
+                        "late_move_under_braking_exploit",
+                        "multiple_defensive_moves_exploit",
+                        "grey_area_exploit",
+                    ],
+                    "regulation_overrides": {
+                        "sporting": {
+                            "max_defensive_moves_per_straight": 1,
+                            "braking_zone_line_freeze_distance_m": 80.0,
+                        }
+                    },
+                    "enforcement_overrides": {
+                        "steward_strictness": "high",
+                        "detection_probability": {
+                            "unsafe_defending": 0.96,
+                            "forcing_off_track": 0.97,
+                        },
+                        "decision_latency_laps": {
+                            "unsafe_defending_penalty": 0,
+                            "forcing_off_track_penalty": 0,
+                        },
+                    },
+                    "expected_tradeoffs": [
+                        "less late squeeze defending",
+                        "clearer one-move rule enforcement",
                     ],
                 }
             )

@@ -144,6 +144,52 @@ def test_steward_penalizes_forcing_off_track() -> None:
     assert cars[0].penalties_s > 0.0
 
 
+def test_steward_escalates_late_move_and_weaving_defense() -> None:
+    engine = StewardEngine(
+        {
+            "detection_probability": {"unsafe_defending": 1.0},
+            "decision_latency_laps": {"unsafe_defending_penalty": 0},
+        }
+    )
+    cars = [_car_state()]
+    event = RaceEvent(
+        event_type="unsafe_defending",
+        lap=6,
+        car_id="car_01",
+        segment_id="t1_braking",
+        details={
+            "battle_pressure": 0.77,
+            "closing_speed_kph": 53.0,
+            "available_room_margin_m": 0.92,
+            "runoff_risk": "medium",
+            "impact_severity": "medium",
+            "segment_type": "braking_zone",
+            "line_change_count": 2,
+            "late_move_probability": 0.83,
+            "late_move_under_braking": True,
+            "multiple_defensive_moves_suspected": True,
+            "steward_detectability": 0.95,
+            "recommended_failure_tags": [
+                "unsafe_defending_exploit",
+                "late_move_under_braking_exploit",
+                "multiple_defensive_moves_exploit",
+            ],
+        },
+    )
+
+    decisions = engine.adjudicate(
+        lap=6,
+        events=[event],
+        cars=cars,
+        weather={"visibility_m": 1000.0, "rain_intensity_mm_h": 0.0},
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].decision_type == "unsafe_defending_penalty"
+    assert "late_move_under_braking" in decisions[0].details["aggravating_factors"]
+    assert "multiple_defensive_moves" in decisions[0].details["aggravating_factors"]
+
+
 def test_failure_classifier_marks_missing_steward_response_as_grey_area() -> None:
     classifier = FailureClassifier()
     run_output = {
@@ -204,11 +250,50 @@ def test_failure_classifier_marks_missing_defending_response_as_grey_area() -> N
     assert "grey_area_exploit" in failure_types
 
 
+def test_failure_classifier_tracks_braking_and_weaving_defense_exploits() -> None:
+    classifier = FailureClassifier()
+    run_output = {
+        "manifest": {"track_id": "monza"},
+        "conditions": {"name": "dry"},
+        "enforcement": {"steward_strictness": "medium"},
+        "event_log": [
+            {
+                "event_type": "unsafe_defending",
+                "lap": 12,
+                "car_id": "car_01",
+                "segment_id": "t1_braking",
+                "details": {
+                    "impact_severity": "high",
+                    "segment_type": "braking_zone",
+                    "late_move_under_braking": True,
+                    "line_change_count": 2,
+                    "recommended_failure_tags": [
+                        "unsafe_defending_exploit",
+                        "late_move_under_braking_exploit",
+                        "multiple_defensive_moves_exploit",
+                    ],
+                },
+            }
+        ],
+        "steward_log": [],
+    }
+
+    failures = classifier.classify(run_output)
+    failure_types = [failure.failure_type for failure in failures]
+
+    assert "unsafe_defending_exploit" in failure_types
+    assert "late_move_under_braking_exploit" in failure_types
+    assert "multiple_defensive_moves_exploit" in failure_types
+    assert "grey_area_exploit" in failure_types
+
+
 def test_mitigation_engine_proposes_defending_controls() -> None:
     mitigations = MitigationEngine().propose_candidates(
         [
             {"failure_type": "unsafe_defending_exploit"},
             {"failure_type": "forcing_off_track_exploit"},
+            {"failure_type": "late_move_under_braking_exploit"},
+            {"failure_type": "multiple_defensive_moves_exploit"},
         ]
     )
 
@@ -216,3 +301,4 @@ def test_mitigation_engine_proposes_defending_controls() -> None:
 
     assert "tighten_defending_enforcement" in names
     assert "mandate_more_racing_room" in names
+    assert "ban_reactive_braking_moves" in names

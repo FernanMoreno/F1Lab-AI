@@ -988,6 +988,44 @@ class RaceMicrokernel:
             max(0.0, battle.battle_segment.width_m - 8.6 - battle_pressure * 1.7),
             3,
         )
+        braking_zone_like = battle.battle_segment.segment_type in {
+            "braking_zone",
+            "hairpin",
+            "chicane",
+            "corner",
+        }
+        line_change_count = 1
+        if defender_action.risk_level >= 0.82 and battle_pressure >= 0.78:
+            line_change_count += 1
+        if (
+            width_pressure >= 0.4
+            and battle.nearest_gap_s <= 1.1
+            and battle_pressure >= 0.82
+        ):
+            line_change_count += 1
+        late_move_probability = round(
+            min(
+                1.0,
+                0.12
+                + defender_action.risk_level * 0.28
+                + closing_pressure * 0.2
+                + width_pressure * 0.1
+                + (0.16 if braking_zone_like else 0.0)
+                + battle.pack_compression_ratio * 0.08
+                + adjusted_risk * 0.12,
+            ),
+            3,
+        )
+        late_move_under_braking = (
+            braking_zone_like
+            and late_move_probability >= 0.62
+            and battle.closing_speed_kph >= 28.0
+        )
+        multiple_defensive_moves = (
+            line_change_count >= 2
+            and battle_pressure >= 0.74
+            and battle.nearest_gap_s <= 1.15
+        )
         event_type = "unsafe_defending"
         failure_type = "unsafe_defending_exploit"
         if (
@@ -1004,6 +1042,12 @@ class RaceMicrokernel:
         elif battle_pressure >= 0.72 or event_type == "forcing_off_track":
             impact_severity = "high"
 
+        recommended_failure_tags = [failure_type]
+        if late_move_under_braking:
+            recommended_failure_tags.append("late_move_under_braking_exploit")
+        if multiple_defensive_moves:
+            recommended_failure_tags.append("multiple_defensive_moves_exploit")
+
         details = {
             "attacker_id": attacker.car_id,
             "defender_id": defender.car_id,
@@ -1019,12 +1063,17 @@ class RaceMicrokernel:
             "slipstream_gain_mps": round(battle.slipstream_gain_mps, 3),
             "dirty_air_penalty_mps": round(battle.dirty_air_penalty_mps, 3),
             "available_room_margin_m": available_room_margin_m,
+            "segment_type": battle.battle_segment.segment_type,
+            "line_change_count": line_change_count,
+            "late_move_probability": late_move_probability,
+            "late_move_under_braking": late_move_under_braking,
+            "multiple_defensive_moves_suspected": multiple_defensive_moves,
             "runoff_type": battle.battle_segment.runoff.type,
             "runoff_risk": battle.battle_segment.runoff.rejoin_risk,
             "segment_name": battle.battle_segment.name,
             "impact_severity": impact_severity,
             "steward_detectability": round(max(0.45, 0.94 - width_pressure * 0.1), 3),
-            "recommended_failure_tags": [failure_type],
+            "recommended_failure_tags": recommended_failure_tags,
             "attacker_forced_off_track": event_type == "forcing_off_track",
             "visibility_m": weather.visibility_m,
         }
