@@ -344,10 +344,35 @@ class CampaignRunner:
 
     def _build_grid(self, spec: CampaignSpec) -> list[CarRuntimeState]:
         families = list(self._car_families.keys())
+        calibration_profile = spec.battle_calibration_profile or {}
+        uses_calibration_grid = any(
+            key in calibration_profile
+            for key in (
+                "grid_gap_scale",
+                "grid_gap_growth",
+                "grid_sync_cumulative",
+            )
+        )
+        base_gap_s = 0.45 * float(calibration_profile.get("grid_gap_scale", 1.0))
+        gap_growth = float(calibration_profile.get("grid_gap_growth", 0.0))
+        sync_cumulative = bool(calibration_profile.get("grid_sync_cumulative", False))
         cars = []
+        previous_gap_to_leader = 0.0
         for index in range(spec.num_cars):
             family = families[index % len(families)]
             team_id = f"team_{index // 2 + 1:02d}"
+            if index == 0:
+                gap_ahead_s = 0.0
+                gap_to_leader_s = 0.0
+            elif uses_calibration_grid:
+                gap_ahead_s = round(
+                    base_gap_s * (1.0 + gap_growth * max(index - 1, 0)),
+                    3,
+                )
+                gap_to_leader_s = round(previous_gap_to_leader + gap_ahead_s, 3)
+            else:
+                gap_ahead_s = 0.45
+                gap_to_leader_s = round(index * 0.45, 3)
             cars.append(
                 CarRuntimeState(
                     car_id=f"car_{index + 1:02d}",
@@ -356,8 +381,8 @@ class CampaignRunner:
                     family_id=family,
                     position=index + 1,
                     lap=0,
-                    gap_to_leader_s=index * 0.45,
-                    gap_ahead_s=0.0 if index == 0 else 0.45,
+                    gap_to_leader_s=gap_to_leader_s,
+                    gap_ahead_s=gap_ahead_s,
                     gap_behind_s=0.45,
                     tyre_compound="C3",
                     tyre_age_laps=0,
@@ -366,9 +391,14 @@ class CampaignRunner:
                     fuel_mass_kg=105.0,
                     aero_mode="straight",
                     last_lap_time_s=0.0,
-                    cumulative_time_s=0.0,
+                    cumulative_time_s=gap_to_leader_s if sync_cumulative else 0.0,
                     damage=0.0,
                 )
+            )
+            previous_gap_to_leader = gap_to_leader_s
+        for index, car in enumerate(cars):
+            car.gap_behind_s = (
+                round(cars[index + 1].gap_ahead_s, 3) if index < len(cars) - 1 else 999.0
             )
         return cars
 

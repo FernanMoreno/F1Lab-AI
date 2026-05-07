@@ -1,3 +1,4 @@
+name: public_primitives_target_pack
 regulation_id: regulation_2026_refined
 primitives:
   - lap
@@ -6,12 +7,36 @@ primitives:
 defaults:
   session_type: race
   mode: rule_based
-  num_cars: 6
+  num_cars: 8
   laps: 10
   candidate_families:
     - race_pace_concept
     - low_drag_missile
     - high_downforce_stable
+thresholds:
+  allowed_statuses:
+    - calibrated
+    - approximate_fit
+  lap:
+    max_mean_score: 0.05
+    max_max_score: 0.08
+    max_mean_error_metrics:
+      lap_time_mape: 0.015
+      top_speed_mape: 0.03
+      sector_share_error: 0.28
+  battle:
+    max_mean_score: 0.4
+    max_max_score: 0.5
+    max_mean_error_metrics:
+      mean_interval_error: 0.6
+      close_following_error: 0.2
+      attack_window_error: 0.25
+      compressed_field_error: 0.35
+      tight_spatial_error: 0.65
+      overtake_rate_error: 0.35
+      closing_speed_error: 0.2
+      incident_rate_error: 0.6
+      stability_error: 0.2
 
 sessions:
   - year: 2024
@@ -19,14 +44,10 @@ sessions:
   - year: 2024
     track_id: monza
   - year: 2024
+    track_id: baku
+    num_cars: 10
+  - year: 2024
     track_id: barcelona
   - year: 2024
-    track_id: silverstone
-  - year: 2024
-    track_id: baku
-  - year: 2024
     track_id: monaco
-  - year: 2024
-    track_id: singapore
-  - year: 2024
-    track_id: austria
+    num_cars: 12

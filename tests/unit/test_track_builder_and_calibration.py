@@ -12,6 +12,7 @@ from reglabsim import create_facade
 from reglabsim.data import LocalDataLake
 from reglabsim.track import GeospatialTrackBuilder, TrackBoundaryProfileEnricher
 from reglabsim.track.track_loader import TrackRepository
+from reglabsim.validation import run_target_pack
 from reglabsim.validation.primitives import PublicPrimitiveCalibrator
 
 
@@ -143,9 +144,9 @@ def _persist_public_session(
         pd.DataFrame(
             [
                 {"date": "2024-04-07T05:00:00Z", "driver_number": 1, "x": 0.0, "y": 0.0},
-                {"date": "2024-04-07T05:00:00Z", "driver_number": 2, "x": 40.0, "y": 0.0},
-                {"date": "2024-04-07T05:00:02Z", "driver_number": 1, "x": 10.0, "y": 0.0},
-                {"date": "2024-04-07T05:00:02Z", "driver_number": 2, "x": 55.0, "y": 0.0},
+                {"date": "2024-04-07T05:00:00Z", "driver_number": 2, "x": 60.0, "y": 0.0},
+                {"date": "2024-04-07T05:00:02Z", "driver_number": 1, "x": 6.0, "y": 0.0},
+                {"date": "2024-04-07T05:00:02Z", "driver_number": 2, "x": 53.0, "y": 0.0},
             ]
         ),
         layer="silver",
@@ -712,7 +713,84 @@ def test_facade_validate_public_primitives_returns_pack_summary(tmp_path: Path) 
     assert result["failure_count"] == 0
     assert result["summary"]["lap"]["successful_cases"] == 2
     assert result["summary"]["battle"]["successful_cases"] == 2
+    assert result["threshold_evaluation"]["passed"] is True
+    assert result["overall_status"] == "meets_thresholds"
     assert result["summary"]["lap"]["best_case"]["track_id"] in {"suzuka", "monza"}
+    assert Path(result["saved_report_path"]).exists()
+
+
+def test_validation_target_pack_config_covers_selected_circuits() -> None:
+    config_path = Path("configs/validation/public_primitives_target_pack.yaml")
+    with open(config_path, encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+
+    session_tracks = [entry["track_id"] for entry in config["sessions"]]
+    session_sizes = {entry["track_id"]: entry.get("num_cars") for entry in config["sessions"]}
+
+    assert config["name"] == "public_primitives_target_pack"
+    assert session_tracks == ["suzuka", "monza", "baku", "barcelona", "monaco"]
+    assert "thresholds" in config
+    assert config["thresholds"]["lap"]["max_mean_score"] <= 0.05
+    assert config["thresholds"]["battle"]["max_mean_score"] <= 0.4
+    assert config["defaults"]["num_cars"] == 8
+    assert session_sizes["baku"] == 10
+    assert session_sizes["monaco"] == 12
+
+
+def test_run_target_pack_returns_multi_circuit_threshold_report(tmp_path: Path) -> None:
+    lake_root = tmp_path / "lake"
+    _persist_public_session(tmp_path, lake_root=lake_root, track_id="suzuka")
+    _persist_public_session(
+        tmp_path,
+        lake_root=lake_root,
+        track_id="monza",
+        lap_time_bias_s=-7.5,
+        top_speed_bias_kph=18.0,
+    )
+    _persist_public_session(
+        tmp_path,
+        lake_root=lake_root,
+        track_id="baku",
+        lap_time_bias_s=1.8,
+        top_speed_bias_kph=7.0,
+    )
+    _persist_public_session(
+        tmp_path,
+        lake_root=lake_root,
+        track_id="barcelona",
+        lap_time_bias_s=-1.2,
+        top_speed_bias_kph=-3.0,
+    )
+    _persist_public_session(
+        tmp_path,
+        lake_root=lake_root,
+        track_id="monaco",
+        lap_time_bias_s=4.5,
+        top_speed_bias_kph=-22.0,
+    )
+    output_dir = tmp_path / "target_pack"
+
+    result = run_target_pack(
+        config_path=Path("configs/validation/public_primitives_target_pack.yaml"),
+        data_root=str(lake_root),
+        output_dir=output_dir,
+        ingest_if_missing=False,
+    )
+
+    assert result["pack_name"] == "public_primitives_target_pack"
+    assert result["case_count"] == 5
+    assert result["failure_count"] == 0
+    assert result["track_coverage"]["missing_tracks"] == []
+    assert result["summary"]["lap"]["successful_cases"] == 5
+    assert result["summary"]["battle"]["successful_cases"] == 5
+    assert result["summary"]["battle"]["status_counts"] == {"calibrated": 5}
+    assert result["threshold_evaluation"]["per_primitive"]["battle"]["checks"][
+        "max_mean_score"
+    ]["passed"] is True
+    assert result["threshold_evaluation"]["per_primitive"]["battle"]["checks"][
+        "mean_error_metrics.attack_window_error"
+    ]["passed"] is False
+    assert result["overall_status"] == "needs_calibration"
     assert Path(result["saved_report_path"]).exists()
 
 

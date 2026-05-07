@@ -767,6 +767,11 @@ class SimulationFacadeImpl:
         effective_regulation = regulation_id or str(
             raw.get("regulation_id", "regulation_2026_refined")
         )
+        thresholds_raw = raw.get("thresholds", {})
+        if thresholds_raw and not isinstance(thresholds_raw, dict):
+            raise ValueError("Validation config 'thresholds' must be a mapping")
+        pack_name = str(raw.get("name", "public_primitives_pack"))
+        required_tracks = list(dict.fromkeys(case.track_id for case in cases))
 
         if ingest_if_missing:
             seen_queries: set[tuple[int, str, str, tuple[int, ...]]] = set()
@@ -794,6 +799,9 @@ class SimulationFacadeImpl:
             regulation_id=effective_regulation,
             primitives=[str(value) for value in primitives_raw],
             output_dir=output_dir,
+            pack_name=pack_name,
+            thresholds=thresholds_raw if isinstance(thresholds_raw, dict) else None,
+            required_tracks=required_tracks,
         )
 
     # ------------------------------------------------------------------

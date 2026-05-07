@@ -24,6 +24,10 @@ DEFAULT_BATTLE_PROFILE = {
     "closing_speed_scale": 1.0,
     "incident_risk_scale": 1.0,
     "track_limit_scale": 1.0,
+    "defense_event_scale": 1.0,
+    "grid_gap_scale": 1.0,
+    "grid_gap_growth": 0.0,
+    "grid_sync_cumulative": False,
 }
 
 MAX_BATTLE_DISTANCE_M = 200.0
@@ -220,12 +224,23 @@ class PublicPrimitiveCalibrator:
         location = self._load_optional_dataset("location", query)
         race_control = self._load_optional_dataset("race_control", query)
         actual_summary = self._summarize_battle_actual(
-            laps_frame, weather, position, intervals, location, race_control, query
+            laps_frame,
+            weather,
+            position,
+            intervals,
+            location,
+            race_control,
+            query,
+            pack_size=num_cars,
         )
 
         representative_laps = laps or max(
             8,
             min(18, int(actual_summary["lap_count"] / max(actual_summary["driver_count"], 1))),
+        )
+        simulated_num_cars = min(
+            num_cars,
+            max(2, int(actual_summary["driver_count"])),
         )
         condition_payload = {
             "weather": actual_summary["weather_inputs"],
@@ -234,43 +249,53 @@ class PublicPrimitiveCalibrator:
 
         candidate_history: list[dict[str, Any]] = []
         best_entry: dict[str, Any] | None = None
+        grid_gap_scales = self._battle_grid_gap_candidates(actual_summary["mean_interval_s"])
+        grid_gap_growth = 0.14 if simulated_num_cars <= 6 else 0.08
 
         with TemporaryDirectory(prefix="f1lab_calibration_") as temp_output:
-            for pace_scale in (0.85, 1.0, 1.15):
-                for closing_scale in (0.85, 1.0, 1.15):
-                    for incident_scale in (0.8, 1.0, 1.2):
-                        profile = {
-                            **DEFAULT_BATTLE_PROFILE,
-                            "pace_delta_scale": pace_scale,
-                            "closing_speed_scale": closing_scale,
-                            "incident_risk_scale": incident_scale,
-                        }
-                        spec = CampaignSpec.from_dict(
-                            {
-                                "campaign_name": f"battle_calibration_{query.track_id}",
-                                "regulation": regulation_id,
-                                "track": query.track_id,
-                                "num_cars": num_cars,
-                                "laps": representative_laps,
-                                "mode": mode,
-                                "seed": 42,
-                                "conditions": condition_payload,
-                                "output_root": temp_output,
-                                "battle_calibration_profile": profile,
-                            }
-                        )
-                        run_output = self._runner.run_race(spec, track_id=query.track_id)
-                        sim_summary = self._summarize_battle_simulated(run_output)
-                        errors = self._battle_errors(actual_summary, sim_summary)
-                        entry = {
-                            "calibration_profile": profile,
-                            "simulated_summary": sim_summary,
-                            "error_metrics": errors,
-                            "score": self._battle_score(errors),
-                        }
-                        candidate_history.append(entry)
-                        if best_entry is None or entry["score"] < best_entry["score"]:
-                            best_entry = entry
+            for pace_scale in (0.45, 0.65, 0.85):
+                for closing_scale in (0.8, 1.6, 2.4):
+                    for incident_scale in (0.5, 1.1, 1.8):
+                        for defense_scale in (0.5, 1.0):
+                            for grid_gap_scale in grid_gap_scales:
+                                profile = {
+                                    **DEFAULT_BATTLE_PROFILE,
+                                    "pace_delta_scale": pace_scale,
+                                    "closing_speed_scale": closing_scale,
+                                    "incident_risk_scale": incident_scale,
+                                    "defense_event_scale": defense_scale,
+                                    "grid_gap_scale": grid_gap_scale,
+                                    "grid_gap_growth": grid_gap_growth,
+                                    "grid_sync_cumulative": True,
+                                }
+                                spec = CampaignSpec.from_dict(
+                                    {
+                                        "campaign_name": f"battle_calibration_{query.track_id}",
+                                        "regulation": regulation_id,
+                                        "track": query.track_id,
+                                        "num_cars": simulated_num_cars,
+                                        "laps": representative_laps,
+                                        "mode": mode,
+                                        "seed": 42,
+                                        "conditions": condition_payload,
+                                        "output_root": temp_output,
+                                        "battle_calibration_profile": profile,
+                                    }
+                                )
+                                run_output = self._runner.run_race(
+                                    spec, track_id=query.track_id
+                                )
+                                sim_summary = self._summarize_battle_simulated(run_output)
+                                errors = self._battle_errors(actual_summary, sim_summary)
+                                entry = {
+                                    "calibration_profile": profile,
+                                    "simulated_summary": sim_summary,
+                                    "error_metrics": errors,
+                                    "score": self._battle_score(errors),
+                                }
+                                candidate_history.append(entry)
+                                if best_entry is None or entry["score"] < best_entry["score"]:
+                                    best_entry = entry
 
         assert best_entry is not None
         candidate_history.sort(key=lambda item: item["score"])
@@ -285,7 +310,11 @@ class PublicPrimitiveCalibrator:
             calibration_profile=dict(best_entry["calibration_profile"]),
             candidate_history=candidate_history[:10],
             error_metrics=dict(best_entry["error_metrics"]),
-            status="calibrated" if best_entry["score"] <= 0.9 else "approximate_fit",
+            status=(
+                "calibrated"
+                if best_entry["score"] <= 0.45
+                else "approximate_fit" if best_entry["score"] <= 0.7 else "needs_tuning"
+            ),
         )
         saved = self._persist_report(
             report, output_dir=output_dir, slug=self._slug(query, "battle")
@@ -299,6 +328,9 @@ class PublicPrimitiveCalibrator:
         regulation_id: str,
         primitives: list[str] | None = None,
         output_dir: str | Path | None = None,
+        pack_name: str | None = None,
+        thresholds: dict[str, Any] | None = None,
+        required_tracks: list[str] | None = None,
     ) -> dict[str, Any]:
         """Run lap and/or battle primitive calibration over multiple circuits."""
         requested_primitives = self._normalize_primitives(primitives)
@@ -370,8 +402,17 @@ class PublicPrimitiveCalibrator:
             primitive: self._aggregate_primitive_reports(primitive, primitive_reports[primitive])
             for primitive in requested_primitives
         }
+        track_coverage = self._track_coverage(cases=cases, successful_cases=cases_payload)
+        threshold_evaluation = self._evaluate_pack_thresholds(
+            summary=summary,
+            thresholds=thresholds or {},
+            required_tracks=required_tracks or track_coverage["requested_tracks"],
+            track_coverage=track_coverage,
+            failure_count=len(failures),
+        )
         pack_report = {
             "schema_version": "primitive_validation_pack.v1",
+            "pack_name": pack_name or "public_primitives_pack",
             "regulation_id": regulation_id,
             "primitives": requested_primitives,
             "case_count": len(cases),
@@ -381,6 +422,12 @@ class PublicPrimitiveCalibrator:
             "failure_count": len(failures),
             "cases": cases_payload,
             "summary": summary,
+            "track_coverage": track_coverage,
+            "thresholds": thresholds or {},
+            "threshold_evaluation": threshold_evaluation,
+            "overall_status": (
+                "meets_thresholds" if threshold_evaluation["passed"] else "needs_calibration"
+            ),
         }
         saved_report_path = self._persist_pack_report(pack_report, output_dir=output_root)
         return {**pack_report, "saved_report_path": saved_report_path}
@@ -598,6 +645,8 @@ class PublicPrimitiveCalibrator:
         location: pd.DataFrame,
         race_control: pd.DataFrame,
         query: SessionQuery,
+        *,
+        pack_size: int,
     ) -> dict[str, Any]:
         valid_laps = self._valid_laps(laps, query.driver_numbers)
         if valid_laps.empty:
@@ -610,7 +659,11 @@ class PublicPrimitiveCalibrator:
         position_summary = self._summarize_actual_positions(
             valid_laps, position, query.driver_numbers
         )
-        interval_summary = self._summarize_actual_intervals(intervals, query.driver_numbers)
+        interval_summary = self._summarize_actual_intervals(
+            intervals,
+            query.driver_numbers,
+            pack_size=pack_size,
+        )
         spatial_summary = self._summarize_actual_location_density(location, query.driver_numbers)
 
         safety_events = 0
@@ -635,16 +688,22 @@ class PublicPrimitiveCalibrator:
             if "lap_number" in valid_laps.columns
             else len(valid_laps)
         )
+        pack_normalization = min(1.0, pack_size / max(position_summary["driver_count"], 1))
+        raw_position_gain_rate_per_lap = position_summary["position_gain_events"] / max(
+            lap_count, 1
+        )
+        raw_safety_event_rate_per_lap = safety_events / max(lap_count, 1)
         return {
             "lap_count": lap_count,
             "driver_count": position_summary["driver_count"],
             "position_change_events": position_summary["position_change_events"],
             "position_gain_events": position_summary["position_gain_events"],
-            "position_gain_rate_per_lap": position_summary["position_gain_events"]
-            / max(lap_count, 1),
+            "position_gain_rate_per_lap_full_field": raw_position_gain_rate_per_lap,
+            "position_gain_rate_per_lap": raw_position_gain_rate_per_lap * pack_normalization,
             "stability_ratio": position_summary["stability_ratio"],
             "closing_speed_proxy_kph": max(5.0, closing_speed_proxy_kph),
-            "safety_event_rate_per_lap": safety_events / max(lap_count, 1),
+            "safety_event_rate_per_lap_full_field": raw_safety_event_rate_per_lap,
+            "safety_event_rate_per_lap": raw_safety_event_rate_per_lap * pack_normalization,
             "close_following_ratio": interval_summary["close_following_ratio"],
             "attack_window_ratio": interval_summary["attack_window_ratio"],
             "compressed_field_ratio": interval_summary["compressed_field_ratio"],
@@ -652,6 +711,7 @@ class PublicPrimitiveCalibrator:
             "tight_spatial_ratio": spatial_summary["tight_spatial_ratio"],
             "median_min_pair_distance_m": spatial_summary["median_min_pair_distance_m"],
             "closing_speed_proxy_from_location_kph": location_closing_speed,
+            "pack_normalization_factor": pack_normalization,
             "weather_inputs": weather_inputs,
             "track_inputs": track_inputs,
         }
@@ -739,6 +799,7 @@ class PublicPrimitiveCalibrator:
         gap_samples: list[float] = []
         close_following_count = 0
         attack_window_count = 0
+        tight_spatial_count = 0
         compressed_field_count = 0
         car_samples = 0
         for previous, current in pairwise(snapshots):
@@ -768,6 +829,8 @@ class PublicPrimitiveCalibrator:
                         close_following_count += 1
                     if 0.0 < gap_ahead <= 1.0:
                         attack_window_count += 1
+                    if 0.0 < gap_ahead <= 1.3:
+                        tight_spatial_count += 1
                 if float(car.get("gap_to_leader_s", 999.0)) <= 5.0:
                     compressed_field_count += 1
         stability_ratio = 1.0 - position_changes / max(total_transitions, 1)
@@ -782,7 +845,7 @@ class PublicPrimitiveCalibrator:
             "attack_window_ratio": attack_window_count / max(len(gap_samples), 1),
             "compressed_field_ratio": compressed_field_count / max(car_samples, 1),
             "mean_interval_s": sum(gap_samples) / max(len(gap_samples), 1),
-            "tight_spatial_ratio": attack_window_count / max(len(gap_samples), 1),
+            "tight_spatial_ratio": tight_spatial_count / max(len(gap_samples), 1),
         }
 
     def _battle_errors(
@@ -790,6 +853,19 @@ class PublicPrimitiveCalibrator:
         actual_summary: dict[str, Any],
         simulated_summary: dict[str, Any],
     ) -> dict[str, float]:
+        activity_error = 0.0
+        if simulated_summary["overtake_rate_per_lap"] < max(
+            0.15, actual_summary["position_gain_rate_per_lap"] * 0.45
+        ):
+            activity_error += 0.35
+        if simulated_summary["closing_speed_proxy_kph"] < max(
+            18.0, actual_summary["closing_speed_proxy_kph"] * 0.45
+        ):
+            activity_error += 0.35
+        if simulated_summary["close_following_ratio"] < max(
+            0.08, actual_summary["close_following_ratio"] * 0.4
+        ):
+            activity_error += 0.3
         return {
             "overtake_rate_error": abs(
                 simulated_summary["overtake_rate_per_lap"]
@@ -826,19 +902,21 @@ class PublicPrimitiveCalibrator:
             "stability_error": abs(
                 simulated_summary["stability_ratio"] - actual_summary["stability_ratio"]
             ),
+            "activity_error": min(1.0, activity_error),
         }
 
     def _battle_score(self, errors: dict[str, float]) -> float:
         return (
-            errors["mean_interval_error"] * 0.22
-            + errors["close_following_error"] * 0.18
-            + errors["attack_window_error"] * 0.14
-            + errors["compressed_field_error"] * 0.12
-            + errors["tight_spatial_error"] * 0.1
+            errors["mean_interval_error"] * 0.15
+            + errors["close_following_error"] * 0.15
+            + errors["attack_window_error"] * 0.1
+            + errors["compressed_field_error"] * 0.08
+            + errors["tight_spatial_error"] * 0.08
             + errors["overtake_rate_error"] * 0.12
-            + errors["closing_speed_error"] * 0.08
+            + errors["closing_speed_error"] * 0.12
             + errors["incident_rate_error"] * 0.05
             + errors["stability_error"] * 0.05
+            + errors["activity_error"] * 0.1
         )
 
     def _valid_laps(self, laps: pd.DataFrame, driver_numbers: list[int] | None) -> pd.DataFrame:
@@ -903,6 +981,8 @@ class PublicPrimitiveCalibrator:
         self,
         intervals: pd.DataFrame,
         driver_numbers: list[int] | None,
+        *,
+        pack_size: int,
     ) -> dict[str, float]:
         if intervals.empty:
             return {
@@ -914,11 +994,34 @@ class PublicPrimitiveCalibrator:
         frame = intervals.copy()
         if driver_numbers:
             frame = frame[frame["driver_number"].isin(driver_numbers)]
+        if {"date", "gap_to_leader"}.issubset(frame.columns) and pack_size >= 2:
+            frame["date"] = self._parse_datetime_utc(frame["date"])
+            frame["interval"] = pd.to_numeric(frame["interval"], errors="coerce")
+            frame["gap_to_leader"] = pd.to_numeric(frame["gap_to_leader"], errors="coerce")
+            frame = frame.dropna(subset=["date", "gap_to_leader"])
+            if not frame.empty:
+                frame["bucket"] = frame["date"].dt.floor("2s")
+                representative_windows = [
+                    window
+                    for _, bucket in frame.groupby("bucket")
+                    if (
+                        window := self._select_representative_interval_window(
+                            bucket,
+                            window_size=pack_size,
+                        )
+                    )
+                    is not None
+                ]
+                if representative_windows:
+                    frame = pd.concat(representative_windows, ignore_index=True)
+
         interval_series = (
             frame["interval"] if "interval" in frame.columns else pd.Series(dtype="float64")
         )
         gap_series = (
-            frame["gap_to_leader"]
+            frame["local_gap_to_pack_leader"]
+            if "local_gap_to_pack_leader" in frame.columns
+            else frame["gap_to_leader"]
             if "gap_to_leader" in frame.columns
             else pd.Series(dtype="float64")
         )
@@ -941,6 +1044,56 @@ class PublicPrimitiveCalibrator:
             "compressed_field_ratio": compressed_ratio,
             "mean_interval_s": mean_interval_s,
         }
+
+    def _select_representative_interval_window(
+        self,
+        bucket: pd.DataFrame,
+        *,
+        window_size: int,
+    ) -> pd.DataFrame | None:
+        ranked = bucket.sort_values("gap_to_leader").dropna(subset=["gap_to_leader"]).copy()
+        if len(ranked) < window_size:
+            return None
+        best_window: pd.DataFrame | None = None
+        best_span: float | None = None
+        best_mean_interval: float | None = None
+        for start in range(len(ranked) - window_size + 1):
+            window = ranked.iloc[start : start + window_size].copy()
+            gap_values = pd.to_numeric(window["gap_to_leader"], errors="coerce").dropna()
+            if gap_values.empty:
+                continue
+            span = float(gap_values.max() - gap_values.min())
+            intervals = pd.to_numeric(window["interval"], errors="coerce").dropna()
+            intervals = intervals[intervals > 0.0]
+            if intervals.empty:
+                mean_interval = float("inf")
+            else:
+                mean_interval = float(intervals.mean())
+            if (
+                best_window is None
+                or span < (best_span or float("inf"))
+                or (
+                    best_span is not None
+                    and abs(span - best_span) < 1e-9
+                    and mean_interval < (best_mean_interval or float("inf"))
+                )
+            ):
+                best_window = window
+                best_span = span
+                best_mean_interval = mean_interval
+        if best_window is None:
+            return None
+        leader_gap = float(best_window["gap_to_leader"].iloc[0])
+        best_window["local_gap_to_pack_leader"] = best_window["gap_to_leader"] - leader_gap
+        return best_window
+
+    def _battle_grid_gap_candidates(self, actual_mean_interval_s: float) -> tuple[float, ...]:
+        anchor = self._clamp(actual_mean_interval_s / 0.6, 1.0, 12.0)
+        candidates = {
+            round(max(1.0, anchor * factor), 2)
+            for factor in (0.5, 0.75, 1.0)
+        }
+        return tuple(sorted(candidates))
 
     def _summarize_actual_location_density(
         self,
@@ -1171,6 +1324,126 @@ class PublicPrimitiveCalibrator:
             "session_type": query["session_type"],
             "status": report["status"],
             "score": score,
+        }
+
+    def _track_coverage(
+        self,
+        *,
+        cases: list[PrimitiveValidationCase],
+        successful_cases: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        requested_tracks: list[str] = []
+        for case in cases:
+            if case.track_id not in requested_tracks:
+                requested_tracks.append(case.track_id)
+        completed_tracks: list[str] = []
+        for case_result in successful_cases:
+            query = case_result.get("query", {})
+            track_id = str(query.get("track_id", ""))
+            if track_id and track_id not in completed_tracks:
+                completed_tracks.append(track_id)
+        missing_tracks = [
+            track_id for track_id in requested_tracks if track_id not in completed_tracks
+        ]
+        return {
+            "requested_tracks": requested_tracks,
+            "completed_tracks": completed_tracks,
+            "missing_tracks": missing_tracks,
+        }
+
+    def _evaluate_pack_thresholds(
+        self,
+        *,
+        summary: dict[str, Any],
+        thresholds: dict[str, Any],
+        required_tracks: list[str],
+        track_coverage: dict[str, Any],
+        failure_count: int,
+    ) -> dict[str, Any]:
+        per_primitive: dict[str, Any] = {}
+        allowed_statuses = {
+            str(value)
+            for value in thresholds.get("allowed_statuses", ["calibrated", "approximate_fit"])
+        }
+        missing_tracks = [
+            track_id
+            for track_id in required_tracks
+            if track_id not in track_coverage["completed_tracks"]
+        ]
+        coverage_passed = not missing_tracks
+
+        for primitive, primitive_summary in summary.items():
+            primitive_thresholds = thresholds.get(primitive, {})
+            status_counts = primitive_summary.get("status_counts", {})
+            unexpected_statuses = sorted(
+                status for status in status_counts if status not in allowed_statuses
+            )
+            checks: dict[str, Any] = {
+                "allowed_statuses": {
+                    "actual": sorted(status_counts),
+                    "allowed": sorted(allowed_statuses),
+                    "passed": not unexpected_statuses,
+                }
+            }
+            passed = not unexpected_statuses
+            for field_name in ("mean_score", "max_score"):
+                threshold_key = f"max_{field_name}"
+                threshold_value = primitive_thresholds.get(threshold_key)
+                if threshold_value is None:
+                    continue
+                actual_value = primitive_summary.get(field_name)
+                check_passed = actual_value is not None and float(actual_value) <= float(
+                    threshold_value
+                )
+                checks[threshold_key] = {
+                    "actual": actual_value,
+                    "threshold": threshold_value,
+                    "passed": check_passed,
+                }
+                passed = passed and check_passed
+
+            for aggregate_key in ("mean_error_metrics", "max_error_metrics"):
+                metric_thresholds = primitive_thresholds.get(f"max_{aggregate_key}", {})
+                if not isinstance(metric_thresholds, dict):
+                    continue
+                aggregate_actual = primitive_summary.get(aggregate_key, {})
+                for metric_name, threshold_value in metric_thresholds.items():
+                    actual_value = aggregate_actual.get(metric_name)
+                    check_passed = actual_value is not None and float(actual_value) <= float(
+                        threshold_value
+                    )
+                    checks[f"{aggregate_key}.{metric_name}"] = {
+                        "actual": actual_value,
+                        "threshold": threshold_value,
+                        "passed": check_passed,
+                    }
+                    passed = passed and check_passed
+
+            per_primitive[primitive] = {
+                "passed": passed,
+                "checks": checks,
+                "unexpected_statuses": unexpected_statuses,
+            }
+
+        failures_passed = failure_count == 0
+        overall_passed = coverage_passed and failures_passed and all(
+            primitive_result["passed"] for primitive_result in per_primitive.values()
+        )
+        return {
+            "passed": overall_passed,
+            "failure_count": failure_count,
+            "coverage": {
+                "required_tracks": required_tracks,
+                "completed_tracks": track_coverage["completed_tracks"],
+                "missing_tracks": missing_tracks,
+                "passed": coverage_passed,
+            },
+            "failures_check": {
+                "actual": failure_count,
+                "threshold": 0,
+                "passed": failures_passed,
+            },
+            "per_primitive": per_primitive,
         }
 
 
