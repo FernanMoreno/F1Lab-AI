@@ -17,6 +17,8 @@ from reglabsim.logging.replay import ReplayEngine
 from reglabsim.runtime.action_arbitrator import ActionArbitrator
 from reglabsim.runtime.action_validator import ActionValidator
 from reglabsim.runtime.agents import (
+    DeepAgentDriverAgent,
+    DeepAgentTeamAgent,
     EventDrivenDriverAgent,
     EventDrivenTeamAgent,
     PolicyReplayDriverAgent,
@@ -153,7 +155,13 @@ class CampaignRunner:
                     recent_events=recent_events,
                 )
                 prompt_trace_metadata.append(
-                    {"lap": lap, "team_id": team_id, "mode": team_agents[team_id].mode}
+                    {
+                        "lap": lap,
+                        "team_id": team_id,
+                        "mode": team_agents[team_id].mode,
+                        "llm_provider": getattr(team_agents[team_id], "llm_provider", "heuristic"),
+                        "llm_model": getattr(team_agents[team_id], "llm_model", "heuristic"),
+                    }
                 )
                 for team_car in team_cars:
                     team_order = team_agents[team_id].decide(team_obs, team_car["car_id"])
@@ -178,7 +186,17 @@ class CampaignRunner:
                     {"lap": lap, "car_id": car.car_id, "observation": driver_obs.to_dict()}
                 )
                 prompt_trace_metadata.append(
-                    {"lap": lap, "car_id": car.car_id, "mode": driver_agents[car.car_id].mode}
+                    {
+                        "lap": lap,
+                        "car_id": car.car_id,
+                        "mode": driver_agents[car.car_id].mode,
+                        "llm_provider": getattr(
+                            driver_agents[car.car_id], "llm_provider", "heuristic"
+                        ),
+                        "llm_model": getattr(
+                            driver_agents[car.car_id], "llm_model", "heuristic"
+                        ),
+                    }
                 )
                 driver_intent = driver_agents[car.car_id].decide(driver_obs)
                 action = arbitrator.arbitrate(team_orders[car.car_id], driver_intent, spec.mode)
@@ -409,10 +427,17 @@ class CampaignRunner:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         team_agents: dict[str, Any] = {}
         driver_agents: dict[str, Any] = {}
+        use_deep_agents = spec.mode != "rule_based" and spec.llm_provider != "heuristic"
         for team_number in range(1, 12):
             team_id = f"team_{team_number:02d}"
             if spec.mode == "rule_based":
                 team_agents[team_id] = RuleBasedTeamAgent()
+            elif use_deep_agents:
+                team_agents[team_id] = DeepAgentTeamAgent(
+                    llm_provider=spec.llm_provider,
+                    llm_model=spec.llm_model,
+                    prompt_template_version=spec.prompt_template_version,
+                )
             else:
                 team_agents[team_id] = EventDrivenTeamAgent()
         for car_index in range(1, spec.num_cars + 1):
@@ -421,6 +446,12 @@ class CampaignRunner:
                 driver_agents[car_id] = PolicyReplayDriverAgent(replay_actions)
             elif spec.mode == "rule_based":
                 driver_agents[car_id] = RuleBasedDriverAgent()
+            elif use_deep_agents:
+                driver_agents[car_id] = DeepAgentDriverAgent(
+                    llm_provider=spec.llm_provider,
+                    llm_model=spec.llm_model,
+                    prompt_template_version=spec.prompt_template_version,
+                )
             else:
                 driver_agents[car_id] = EventDrivenDriverAgent()
         return team_agents, driver_agents
