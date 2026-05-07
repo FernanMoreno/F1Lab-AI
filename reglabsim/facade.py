@@ -33,7 +33,7 @@ from reglabsim.regulation.base import Regulation
 from reglabsim.track.builder import GeospatialTrackBuilder
 from reglabsim.track.enrichment import TrackBoundaryProfileEnricher
 from reglabsim.track.track_loader import TrackRepository
-from reglabsim.validation.primitives import PublicPrimitiveCalibrator
+from reglabsim.validation.primitives import PrimitiveValidationCase, PublicPrimitiveCalibrator
 from reglabsim.validation.public_session import PublicSessionValidator
 from reglabsim.vehicle.car_family import CarFamily
 
@@ -721,6 +721,68 @@ class SimulationFacadeImpl:
             mode=mode,
             num_cars=num_cars,
             laps=laps,
+            output_dir=output_dir,
+        )
+
+    def validate_public_primitives(
+        self,
+        *,
+        config_path: str | Path,
+        data_root: str = "data",
+        output_dir: str | Path | None = None,
+        ingest_if_missing: bool = True,
+        regulation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run lap/battle primitive validation over a multi-circuit session pack."""
+        raw = self._load_yaml(config_path)
+        sessions_raw = raw.get("sessions", [])
+        if not isinstance(sessions_raw, list) or not sessions_raw:
+            raise ValueError("Validation config must define a non-empty 'sessions' list")
+        defaults_raw = raw.get("defaults", {})
+        if defaults_raw and not isinstance(defaults_raw, dict):
+            raise ValueError("Validation config 'defaults' must be a mapping")
+        cases: list[PrimitiveValidationCase] = []
+        for session_data in sessions_raw:
+            if not isinstance(session_data, dict):
+                raise ValueError("Each validation session entry must be a mapping")
+            cases.append(
+                PrimitiveValidationCase.from_dict(
+                    session_data,
+                    defaults=defaults_raw if isinstance(defaults_raw, dict) else None,
+                )
+            )
+        primitives_raw = raw.get("primitives", ["lap", "battle"])
+        if not isinstance(primitives_raw, list):
+            raise ValueError("Validation config 'primitives' must be a list")
+        effective_regulation = regulation_id or str(
+            raw.get("regulation_id", "regulation_2026_refined")
+        )
+
+        if ingest_if_missing:
+            seen_queries: set[tuple[int, str, str, tuple[int, ...]]] = set()
+            for case in cases:
+                dedupe_key = (
+                    case.year,
+                    case.track_id,
+                    case.session_type,
+                    tuple(case.driver_numbers),
+                )
+                if dedupe_key in seen_queries:
+                    continue
+                seen_queries.add(dedupe_key)
+                self.ingest_public_session_data(
+                    year=case.year,
+                    track_id=case.track_id,
+                    session_type=case.session_type,
+                    driver_numbers=case.driver_numbers,
+                    data_root=data_root,
+                )
+
+        calibrator = self._primitive_calibrator(data_root=data_root)
+        return calibrator.validate_pack(
+            cases=cases,
+            regulation_id=effective_regulation,
+            primitives=[str(value) for value in primitives_raw],
             output_dir=output_dir,
         )
 

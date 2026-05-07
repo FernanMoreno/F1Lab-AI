@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from itertools import pairwise
 from pathlib import Path
+from statistics import median
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -49,6 +50,54 @@ class PrimitiveCalibrationReport:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-safe mapping."""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class PrimitiveValidationCase:
+    """One public-session validation case for lap and battle primitives."""
+
+    year: int
+    track_id: str
+    session_type: str
+    driver_numbers: list[int] = field(default_factory=list)
+    candidate_families: list[str] = field(default_factory=list)
+    mode: str = "llm_event_driven"
+    num_cars: int = 6
+    laps: int | None = None
+
+    @classmethod
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        defaults: dict[str, Any] | None = None,
+    ) -> PrimitiveValidationCase:
+        """Build one typed validation case from YAML-friendly mappings."""
+        merged = dict(defaults or {})
+        merged.update(data)
+        return cls(
+            year=int(merged["year"]),
+            track_id=str(merged["track_id"]),
+            session_type=str(merged["session_type"]),
+            driver_numbers=[int(value) for value in merged.get("driver_numbers", [])],
+            candidate_families=[str(value) for value in merged.get("candidate_families", [])],
+            mode=str(merged.get("mode", "llm_event_driven")),
+            num_cars=int(merged.get("num_cars", 6)),
+            laps=int(merged["laps"]) if merged.get("laps") is not None else None,
+        )
+
+    def to_query(self) -> SessionQuery:
+        """Return canonical session query for data-lake access."""
+        return SessionQuery(
+            year=self.year,
+            track_id=self.track_id,
+            session_type=self.session_type,
+            driver_numbers=list(self.driver_numbers),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return serializable mapping."""
         return asdict(self)
 
 
@@ -242,6 +291,99 @@ class PublicPrimitiveCalibrator:
             report, output_dir=output_dir, slug=self._slug(query, "battle")
         )
         return PrimitiveCalibrationReport(**(report.to_dict() | saved)).to_dict()
+
+    def validate_pack(
+        self,
+        *,
+        cases: list[PrimitiveValidationCase],
+        regulation_id: str,
+        primitives: list[str] | None = None,
+        output_dir: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Run lap and/or battle primitive calibration over multiple circuits."""
+        requested_primitives = self._normalize_primitives(primitives)
+        output_root = Path(output_dir) if output_dir is not None else None
+        if output_root is not None:
+            output_root.mkdir(parents=True, exist_ok=True)
+
+        cases_payload: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        primitive_reports: dict[str, list[dict[str, Any]]] = {
+            primitive: [] for primitive in requested_primitives
+        }
+
+        for case in cases:
+            query = case.to_query()
+            query_payload = query.to_dict()
+            case_slug = self._slug(query, "pack")
+            case_output_dir = output_root / case_slug if output_root is not None else None
+            case_result: dict[str, Any] = {
+                "query": query_payload,
+                "lap": None,
+                "battle": None,
+                "failures": [],
+            }
+
+            if "lap" in requested_primitives:
+                try:
+                    lap_report = self.calibrate_lap(
+                        query=query,
+                        regulation_id=regulation_id,
+                        candidate_families=case.candidate_families or None,
+                        output_dir=case_output_dir,
+                    )
+                    case_result["lap"] = lap_report
+                    primitive_reports["lap"].append(lap_report)
+                except Exception as exc:
+                    failure = {
+                        "query": query_payload,
+                        "primitive": "lap",
+                        "error": str(exc),
+                    }
+                    case_result["failures"].append(failure)
+                    failures.append(failure)
+
+            if "battle" in requested_primitives:
+                try:
+                    battle_report = self.calibrate_battle(
+                        query=query,
+                        regulation_id=regulation_id,
+                        mode=case.mode,
+                        num_cars=case.num_cars,
+                        laps=case.laps,
+                        output_dir=case_output_dir,
+                    )
+                    case_result["battle"] = battle_report
+                    primitive_reports["battle"].append(battle_report)
+                except Exception as exc:
+                    failure = {
+                        "query": query_payload,
+                        "primitive": "battle",
+                        "error": str(exc),
+                    }
+                    case_result["failures"].append(failure)
+                    failures.append(failure)
+
+            cases_payload.append(case_result)
+
+        summary = {
+            primitive: self._aggregate_primitive_reports(primitive, primitive_reports[primitive])
+            for primitive in requested_primitives
+        }
+        pack_report = {
+            "schema_version": "primitive_validation_pack.v1",
+            "regulation_id": regulation_id,
+            "primitives": requested_primitives,
+            "case_count": len(cases),
+            "successful_primitive_runs": sum(
+                len(reports) for reports in primitive_reports.values()
+            ),
+            "failure_count": len(failures),
+            "cases": cases_payload,
+            "summary": summary,
+        }
+        saved_report_path = self._persist_pack_report(pack_report, output_dir=output_root)
+        return {**pack_report, "saved_report_path": saved_report_path}
 
     def _load_dataset(self, dataset_name: str, query: SessionQuery) -> pd.DataFrame:
         return self._lake.load_frame(
@@ -926,6 +1068,20 @@ class PublicPrimitiveCalibrator:
             "saved_profile_path": str(profile_path),
         }
 
+    def _persist_pack_report(
+        self,
+        report: dict[str, Any],
+        *,
+        output_dir: Path | None,
+    ) -> str | None:
+        if output_dir is None:
+            return None
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report_path = output_dir / "primitive_validation_pack_report.json"
+        with open(report_path, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+        return str(report_path)
+
     def _slug(self, query: SessionQuery, primitive: str) -> str:
         return f"{primitive}_{query.track_id}_{query.year}_{query.session_type}".replace(
             " ", "_"
@@ -941,4 +1097,86 @@ class PublicPrimitiveCalibrator:
         return max(lower, min(upper, value))
 
 
-__all__ = ["DEFAULT_BATTLE_PROFILE", "PrimitiveCalibrationReport", "PublicPrimitiveCalibrator"]
+    def _normalize_primitives(self, primitives: list[str] | None) -> list[str]:
+        requested = [primitive.lower() for primitive in (primitives or ["lap", "battle"])]
+        invalid = sorted(
+            {primitive for primitive in requested if primitive not in {"lap", "battle"}}
+        )
+        if invalid:
+            raise ValueError(f"Unsupported primitives requested: {', '.join(invalid)}")
+        ordered: list[str] = []
+        for primitive in requested:
+            if primitive not in ordered:
+                ordered.append(primitive)
+        return ordered
+
+    def _aggregate_primitive_reports(
+        self,
+        primitive: str,
+        reports: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not reports:
+            return {
+                "successful_cases": 0,
+                "status_counts": {},
+                "mean_score": None,
+                "median_score": None,
+                "max_score": None,
+                "mean_error_metrics": {},
+                "max_error_metrics": {},
+                "best_case": None,
+                "worst_case": None,
+            }
+        score_fn = self._lap_score if primitive == "lap" else self._battle_score
+        scores = [score_fn(report["error_metrics"]) for report in reports]
+        status_counts: dict[str, int] = {}
+        for report in reports:
+            status = str(report["status"])
+            status_counts[status] = status_counts.get(status, 0) + 1
+        metric_names = sorted(
+            {
+                metric_name
+                for report in reports
+                for metric_name in report.get("error_metrics", {}).keys()
+            }
+        )
+        mean_error_metrics = {
+            metric_name: sum(float(report["error_metrics"][metric_name]) for report in reports)
+            / len(reports)
+            for metric_name in metric_names
+        }
+        max_error_metrics = {
+            metric_name: max(float(report["error_metrics"][metric_name]) for report in reports)
+            for metric_name in metric_names
+        }
+        best_index = min(range(len(reports)), key=lambda index: scores[index])
+        worst_index = max(range(len(reports)), key=lambda index: scores[index])
+        return {
+            "successful_cases": len(reports),
+            "status_counts": status_counts,
+            "mean_score": sum(scores) / len(scores),
+            "median_score": median(scores),
+            "max_score": max(scores),
+            "mean_error_metrics": mean_error_metrics,
+            "max_error_metrics": max_error_metrics,
+            "best_case": self._pack_case_summary(reports[best_index], scores[best_index]),
+            "worst_case": self._pack_case_summary(reports[worst_index], scores[worst_index]),
+        }
+
+    def _pack_case_summary(self, report: dict[str, Any], score: float) -> dict[str, Any]:
+        query = dict(report["query"])
+        return {
+            "track_id": query["track_id"],
+            "year": query["year"],
+            "session_type": query["session_type"],
+            "status": report["status"],
+            "score": score,
+        }
+
+
+__all__ = [
+    "DEFAULT_BATTLE_PROFILE",
+    "PrimitiveCalibrationReport",
+    "PrimitiveValidationCase",
+    "PublicPrimitiveCalibrator",
+]

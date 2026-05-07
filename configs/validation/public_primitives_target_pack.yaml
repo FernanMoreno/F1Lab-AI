@@ -1,0 +1,32 @@
+regulation_id: regulation_2026_refined
+primitives:
+  - lap
+  - battle
+
+defaults:
+  session_type: race
+  mode: rule_based
+  num_cars: 6
+  laps: 10
+  candidate_families:
+    - race_pace_concept
+    - low_drag_missile
+    - high_downforce_stable
+
+sessions:
+  - year: 2024
+    track_id: suzuka
+  - year: 2024
+    track_id: monza
+  - year: 2024
+    track_id: barcelona
+  - year: 2024
+    track_id: silverstone
+  - year: 2024
+    track_id: baku
+  - year: 2024
+    track_id: monaco
+  - year: 2024
+    track_id: singapore
+  - year: 2024
+    track_id: austria

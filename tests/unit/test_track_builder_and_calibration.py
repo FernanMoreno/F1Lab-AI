@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 from reglabsim import create_facade
 from reglabsim.data import LocalDataLake
@@ -14,51 +15,58 @@ from reglabsim.track.track_loader import TrackRepository
 from reglabsim.validation.primitives import PublicPrimitiveCalibrator
 
 
-def _persist_public_session(tmp_path: Path) -> str:
-    lake_root = tmp_path / "lake"
+def _persist_public_session(
+    tmp_path: Path,
+    *,
+    track_id: str = "suzuka",
+    lap_time_bias_s: float = 0.0,
+    top_speed_bias_kph: float = 0.0,
+    lake_root: Path | None = None,
+) -> str:
+    lake_root = lake_root or tmp_path / "lake"
     lake = LocalDataLake(lake_root)
-    partition = "year=2024/track=suzuka/session=race"
+    partition = f"year=2024/track={track_id}/session=race"
     lake.persist_frame(
         pd.DataFrame(
             [
                 {
                     "driver_number": 1,
                     "lap_number": 3,
-                    "lap_duration": 91.2,
+                    "lap_duration": 91.2 + lap_time_bias_s,
                     "duration_sector_1": 31.0,
                     "duration_sector_2": 28.8,
                     "duration_sector_3": 31.4,
-                    "st_speed": 305.0,
+                    "st_speed": 305.0 + top_speed_bias_kph,
                     "is_pit_out_lap": False,
                 },
                 {
                     "driver_number": 1,
                     "lap_number": 4,
-                    "lap_duration": 90.9,
+                    "lap_duration": 90.9 + lap_time_bias_s,
                     "duration_sector_1": 30.9,
                     "duration_sector_2": 28.7,
                     "duration_sector_3": 31.3,
-                    "st_speed": 307.0,
+                    "st_speed": 307.0 + top_speed_bias_kph,
                     "is_pit_out_lap": False,
                 },
                 {
                     "driver_number": 2,
                     "lap_number": 3,
-                    "lap_duration": 91.6,
+                    "lap_duration": 91.6 + lap_time_bias_s,
                     "duration_sector_1": 31.2,
                     "duration_sector_2": 28.9,
                     "duration_sector_3": 31.5,
-                    "st_speed": 304.0,
+                    "st_speed": 304.0 + top_speed_bias_kph,
                     "is_pit_out_lap": False,
                 },
                 {
                     "driver_number": 2,
                     "lap_number": 4,
-                    "lap_duration": 91.1,
+                    "lap_duration": 91.1 + lap_time_bias_s,
                     "duration_sector_1": 31.0,
                     "duration_sector_2": 28.8,
                     "duration_sector_3": 31.3,
-                    "st_speed": 306.0,
+                    "st_speed": 306.0 + top_speed_bias_kph,
                     "is_pit_out_lap": False,
                 },
             ]
@@ -604,6 +612,60 @@ def test_facade_calibrate_public_battle_accepts_mixed_iso_location_dates(
 
     assert result["primitive"] == "battle"
     assert result["actual_summary"]["closing_speed_proxy_from_location_kph"] >= 0.0
+
+
+def test_facade_validate_public_primitives_returns_pack_summary(tmp_path: Path) -> None:
+    lake_root = tmp_path / "lake"
+    _persist_public_session(tmp_path, lake_root=lake_root, track_id="suzuka")
+    _persist_public_session(
+        tmp_path,
+        lake_root=lake_root,
+        track_id="monza",
+        lap_time_bias_s=-7.5,
+        top_speed_bias_kph=18.0,
+    )
+    config_path = tmp_path / "public_primitives_pack.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "regulation_id": "regulation_2026_refined",
+                "primitives": ["lap", "battle"],
+                "defaults": {
+                    "session_type": "race",
+                    "mode": "rule_based",
+                    "num_cars": 4,
+                    "laps": 6,
+                    "candidate_families": [
+                        "race_pace_concept",
+                        "low_drag_missile",
+                    ],
+                },
+                "sessions": [
+                    {"year": 2024, "track_id": "suzuka"},
+                    {"year": 2024, "track_id": "monza"},
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "validation_pack"
+    facade = create_facade()
+
+    result = facade.validate_public_primitives(
+        config_path=config_path,
+        data_root=str(lake_root),
+        output_dir=output_dir,
+        ingest_if_missing=False,
+    )
+
+    assert result["schema_version"] == "primitive_validation_pack.v1"
+    assert result["case_count"] == 2
+    assert result["failure_count"] == 0
+    assert result["summary"]["lap"]["successful_cases"] == 2
+    assert result["summary"]["battle"]["successful_cases"] == 2
+    assert result["summary"]["lap"]["best_case"]["track_id"] in {"suzuka", "monza"}
+    assert Path(result["saved_report_path"]).exists()
 
 
 def test_location_density_ignores_unrealistic_nearest_distance_jumps() -> None:

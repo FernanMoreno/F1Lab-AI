@@ -710,6 +710,15 @@ class SimulationFacade(Protocol):
         """Calibrate battle-level primitives against public session data."""
         ...
 
+    def validate_public_primitives(
+        self,
+        *,
+        config_path: str | Path,
+        data_root: str = "data",
+    ) -> dict[str, Any]:
+        """Validate lap/battle primitives over a multi-circuit public-session pack."""
+        ...
+
 
 # =============================================================================
 # Type Aliases

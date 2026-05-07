@@ -222,6 +222,31 @@ def calibrate_public_battle(
     typer.echo(json.dumps(result, indent=2))
 
 
+@app.command("validate-public-primitives")
+def validate_public_primitives(
+    config: Path = typer.Argument(..., exists=True, readable=True),
+    data_root: str = typer.Option("data", help="Local data-lake root"),
+    output_dir: Path | None = typer.Option(
+        None, help="Optional output directory for aggregate and per-case reports"
+    ),
+    ingest_if_missing: bool = typer.Option(
+        True, help="Fetch public session bundles before validating"
+    ),
+    regulation_id: str | None = typer.Option(
+        None, help="Optional regulation override for all validation cases"
+    ),
+) -> None:
+    facade = create_facade()
+    result = facade.validate_public_primitives(
+        config_path=config,
+        data_root=data_root,
+        output_dir=output_dir,
+        ingest_if_missing=ingest_if_missing,
+        regulation_id=regulation_id,
+    )
+    typer.echo(json.dumps(result, indent=2))
+
+
 @app.command("run-multiagent-race")
 def run_multiagent_race(
     config: Path = typer.Argument(..., exists=True, readable=True),
