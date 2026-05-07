@@ -2,8 +2,44 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
-from gymnasium.spaces import Box, Discrete, MultiDiscrete  # type: ignore
+
+try:  # pragma: no cover - exercised when gymnasium is installed
+    import gymnasium.spaces as gym_spaces  # type: ignore
+except Exception:  # pragma: no cover - lightweight fallback for base environments
+    @dataclass(frozen=True)
+    class Discrete:
+        """Minimal discrete space fallback."""
+
+        n: int
+
+    class MultiDiscrete:
+        """Minimal multidiscrete space fallback."""
+
+        def __init__(self, nvec: list[int]):
+            self.nvec = np.array(nvec, dtype=np.int64)
+
+    class Box:
+        """Minimal continuous box fallback."""
+
+        def __init__(
+            self,
+            *,
+            low: float,
+            high: float,
+            shape: tuple[int, ...],
+            dtype: type[np.float32],
+        ):
+            self.low = low
+            self.high = high
+            self.shape = shape
+            self.dtype = dtype
+else:  # pragma: no cover - thin aliasing path
+    Box = gym_spaces.Box  # type: ignore[misc]
+    Discrete = gym_spaces.Discrete  # type: ignore[misc]
+    MultiDiscrete = gym_spaces.MultiDiscrete  # type: ignore[misc]
 
 
 class RaceActionSpaces:

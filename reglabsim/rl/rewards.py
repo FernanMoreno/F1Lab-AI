@@ -118,7 +118,7 @@ class RaceRewards:
 
         # Tyre management
         reward += RaceRewards.tyre_management_reward(
-            race_state.get(" tyre_age_laps", 0),
+            race_state.get("tyre_age_laps", 0),
             target_age_laps=25,
         )
 
@@ -127,5 +127,10 @@ class RaceRewards:
             race_state.get("ers_soc", 0.5),
             is_deploying=action[1] == 2,  # boost mode
         )
+
+        if race_state.get("damage", 0.0) > old_state.get("damage", 0.0):
+            reward -= 4.0
+        if race_state.get("warnings", 0) > old_state.get("warnings", 0):
+            reward -= 2.0
 
         return reward

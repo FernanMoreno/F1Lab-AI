@@ -2,21 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar
+
+import numpy as np
 
 
 @dataclass
 class AdversarialResult:
-    """Result of adversarial search.
-
-    Attributes:
-        failure_mode: Identified failure mode.
-        scenario: Scenario that triggers failure.
-        metric_values: Metric values at failure.
-        confidence: Confidence level.
-        mitigation: Suggested mitigation.
-    """
+    """Result of adversarial search."""
 
     failure_mode: str
     scenario: dict[str, Any]
@@ -26,20 +21,8 @@ class AdversarialResult:
 
 
 class AdversarialSearch:
-    """Searches for regulation weaknesses.
+    """Search for regulation weaknesses over a configurable scenario space."""
 
-    Finds scenarios where regulation fails health thresholds.
-
-    Example:
-        >>> search = AdversarialSearch()
-        >>> results = search.find_weaknesses(
-        ...     regulation=reg_2026,
-        ...     metrics=[battery_dep, artificial_pass],
-        ...     thresholds={"battery_dependency_index": 0.4},
-        ... )
-    """
-
-    # Known failure modes
     FAILURE_MODES: ClassVar[dict[str, str]] = {
         "battery_dominance": "Excessive ERS influence on race outcome",
         "artificial_overtaking": "Boost-based overtakes not reflecting real pace",
@@ -49,7 +32,6 @@ class AdversarialSearch:
     }
 
     def __init__(self, seed: int | None = None):
-        """Initialize adversarial search."""
         self._seed = seed
 
     def find_weaknesses(
@@ -59,56 +41,72 @@ class AdversarialSearch:
         thresholds: dict[str, float],
         search_space: dict[str, tuple[float, float]],
         n_trials: int = 1000,
+        evaluator: Callable[[dict[str, Any], dict[str, float]], dict[str, float]] | None = None,
+        top_k: int | None = None,
     ) -> list[AdversarialResult]:
-        """Find regulation weaknesses.
-
-        Args:
-            regulation: Regulation config.
-            metrics: List of metric calculators.
-            thresholds: Failure thresholds.
-            search_space: Parameter search space.
-            n_trials: Number of trials.
-
-        Returns:
-            List of identified weaknesses.
-        """
-        import numpy as np
-
+        """Find scenarios where metric values exceed failure thresholds."""
         rng = np.random.default_rng(self._seed)
         failures: list[AdversarialResult] = []
 
         for _ in range(n_trials):
-            # Sample random scenario
             scenario = {
-                name: rng.uniform(bounds[0], bounds[1]) for name, bounds in search_space.items()
+                name: float(rng.uniform(bounds[0], bounds[1]))
+                for name, bounds in search_space.items()
             }
-
-            # Evaluate metrics (simplified - would run full simulation)
-            metric_values = {
-                "battery_dependency_index": rng.uniform(0.2, 0.6),
-                "artificial_pass_index": rng.uniform(0.1, 0.6),
-                "dangerous_closing_speed_index": rng.uniform(0.01, 0.1),
-                "train_formation_index": rng.uniform(0.1, 0.5),
-            }
-
-            # Check for failures
+            metric_values = (
+                evaluator(regulation, scenario)
+                if evaluator is not None
+                else self._default_metric_values(rng, scenario)
+            )
             for metric_name, threshold in thresholds.items():
-                value = metric_values.get(metric_name, 0)
-                if value > threshold:
-                    failures.append(
-                        AdversarialResult(
-                            failure_mode=self._identify_failure_mode(metric_name),
-                            scenario=scenario,
-                            metric_values=metric_values,
-                            confidence=rng.uniform(0.6, 0.9),
-                            mitigation=self._suggest_mitigation(metric_name),
-                        )
+                value = float(metric_values.get(metric_name, 0.0))
+                if value <= threshold:
+                    continue
+                failures.append(
+                    AdversarialResult(
+                        failure_mode=self._identify_failure_mode(metric_name),
+                        scenario=scenario,
+                        metric_values={key: float(val) for key, val in metric_values.items()},
+                        confidence=self._confidence(value=value, threshold=threshold),
+                        mitigation=self._suggest_mitigation(metric_name),
                     )
+                )
 
-        return failures
+        failures.sort(
+            key=lambda failure: (
+                -failure.confidence,
+                -max(failure.metric_values.values(), default=0.0),
+                failure.failure_mode,
+            )
+        )
+        return failures[:top_k] if top_k is not None else failures
+
+    def _default_metric_values(
+        self,
+        rng: np.random.Generator,
+        scenario: dict[str, float],
+    ) -> dict[str, float]:
+        energy_factor = scenario.get("battery_soc_bias", 0.5)
+        drag_factor = scenario.get("drag_balance", 0.5)
+        traffic_factor = scenario.get("pack_density", 0.5)
+        return {
+            "battery_dependency_index": float(
+                0.18 + energy_factor * 0.38 + rng.uniform(-0.03, 0.03)
+            ),
+            "artificial_pass_index": float(
+                0.12 + drag_factor * 0.33 + rng.uniform(-0.03, 0.03)
+            ),
+            "dangerous_closing_speed_index": float(
+                0.01 + (drag_factor + traffic_factor) * 0.03 + rng.uniform(-0.005, 0.005)
+            ),
+            "train_formation_index": float(0.14 + traffic_factor * 0.32 + rng.uniform(-0.03, 0.03)),
+        }
+
+    def _confidence(self, *, value: float, threshold: float) -> float:
+        delta = max(0.0, value - threshold)
+        return round(min(0.99, 0.6 + delta * 2.5), 4)
 
     def _identify_failure_mode(self, metric_name: str) -> str:
-        """Map metric to failure mode."""
         mapping = {
             "battery_dependency_index": "battery_dominance",
             "artificial_pass_index": "artificial_overtaking",
@@ -118,7 +116,6 @@ class AdversarialSearch:
         return mapping.get(metric_name, "unknown")
 
     def _suggest_mitigation(self, metric_name: str) -> str:
-        """Suggest mitigation for metric failure."""
         mitigations = {
             "battery_dependency_index": "Reduce ERS max deployment or increase battery capacity",
             "artificial_pass_index": "Increase overtake mode activation gap",
