@@ -63,3 +63,22 @@ def test_propose_mitigations_returns_counterfactuals(tmp_path: Path) -> None:
     assert "after_failures" in mitigations[0]
     assert "priority_delta" in mitigations[0]
     assert "after_priority_score" in mitigations[0]
+
+
+def test_fullgrid_runtime_stays_within_stability_bounds(tmp_path: Path) -> None:
+    facade = create_facade()
+    config_path = _campaign_config(tmp_path, "fullgrid_barcelona_rule_based.yaml")
+
+    result = facade.run_multiagent_race(config_path)
+    final_snapshot = result["state_snapshots"][-1]
+
+    assert result["manifest"]["track_id"] == "barcelona"
+    assert result["manifest"]["mode"] == "rule_based"
+    assert len(result["state_snapshots"]) == 54
+    assert len(result["result"]["final_positions"]) == 22
+    assert len(set(result["result"]["final_positions"])) == 22
+    assert all(0.0 <= car["ers_soc"] <= 1.0 for car in final_snapshot["cars"])
+    assert all(car["fuel_mass_kg"] >= 0.0 for car in final_snapshot["cars"])
+    assert result["metrics"]["incident_count"] <= 20
+    assert result["metrics"]["forcing_off_track_events"] <= 12
+    assert result["metrics"]["retirements"] <= 6

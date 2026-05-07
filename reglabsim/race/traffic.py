@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 
 @dataclass
 class OvertakeEvent:
@@ -52,6 +54,10 @@ class TrafficModel:
         closing_speed_kph: float,
         drs_available: bool,
         ers_advantage: float,
+        slipstream_gain_mps: float = 0.0,
+        dirty_air_penalty_mps: float = 0.0,
+        pack_compression_ratio: float = 0.0,
+        local_density: float = 1.0,
     ) -> float:
         """Calculate overtake success probability.
 
@@ -64,26 +70,35 @@ class TrafficModel:
         Returns:
             Probability (0-1).
         """
-        # Base probability from pace difference
-        base_prob = 0.5
+        base_prob = 0.18
+        base_prob += max(0.0, min(0.35, -pace_diff_s_per_lap * 0.22))
+        base_prob += min(0.24, closing_speed_kph / 140.0)
+        base_prob += min(0.12, max(0.0, ers_advantage) * 0.08)
+        base_prob += min(0.1, max(0.0, slipstream_gain_mps) * 0.02)
+        base_prob -= min(0.14, max(0.0, dirty_air_penalty_mps) * 0.04)
+        base_prob += pack_compression_ratio * 0.08
+        base_prob -= min(0.08, max(0.0, local_density - 1.0) * 0.03)
 
-        # Better pace = higher probability
-        if pace_diff_s_per_lap < 0:
-            base_prob += 0.2  # Attacker faster
-
-        # DRS helps
         if drs_available:
             base_prob += 0.15
 
-        # Energy advantage helps
-        if ers_advantage > 1.0:
-            base_prob += 0.1
-
-        # Closing speed matters
-        if closing_speed_kph > 150:
-            base_prob += 0.1
-
         return max(0.0, min(1.0, base_prob))
+
+    def is_battle_eligible(
+        self,
+        *,
+        gap_s: float,
+        battle_distance_m: float,
+        closing_speed_kph: float,
+        attacker_committed: bool,
+        defender_committed: bool,
+    ) -> bool:
+        """Return whether a position change looks like a real on-track battle."""
+        if gap_s > 1.6 or battle_distance_m > 95.0:
+            return False
+        if attacker_committed or defender_committed:
+            return True
+        return closing_speed_kph >= 14.0
 
     def calculate_closing_speed(
         self,
@@ -107,6 +122,7 @@ class TrafficModel:
         defender_config: dict[str, Any],
         regulation: dict[str, Any],
         drs_available: bool = False,
+        rng: np.random.Generator | None = None,
     ) -> OvertakeEvent:
         """Simulate an overtake attempt.
 
@@ -138,10 +154,8 @@ class TrafficModel:
             drs_available=drs_available,
             ers_advantage=ers_adv,
         )
-
-        import numpy as np
-
-        success = np.random.random() < prob
+        generator = rng or np.random.default_rng()
+        success = bool(generator.random() < prob)
 
         event = OvertakeEvent(
             lap=attacker_config.get("lap", 1),
