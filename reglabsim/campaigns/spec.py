@@ -62,6 +62,16 @@ class CampaignSpec:
         with open(path, encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
         path_obj = Path(path)
+        steward_default_path = path_obj.parent.parent / "steward" / "default.yaml"
+        default_enforcement = cls._load_mapping(steward_default_path)
+        if default_enforcement:
+            explicit_enforcement = data.get("enforcement", {})
+            if explicit_enforcement and not isinstance(explicit_enforcement, dict):
+                raise ValueError("Campaign config 'enforcement' must be a mapping")
+            data["enforcement"] = cls._merge_mappings(
+                default_enforcement,
+                explicit_enforcement if isinstance(explicit_enforcement, dict) else {},
+            )
         conditions_dir = path_obj.parent.parent / "conditions"
         if not conditions_dir.exists():
             conditions_dir = Path("configs/conditions")
@@ -194,3 +204,23 @@ class CampaignSpec:
     def config_hash(self) -> str:
         payload = json.dumps(self.to_dict(), sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _load_mapping(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        with open(path, encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        if not isinstance(data, dict):
+            raise ValueError(f"YAML at {path} must decode to a mapping")
+        return dict(data)
+
+    @staticmethod
+    def _merge_mappings(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(base)
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = CampaignSpec._merge_mappings(merged[key], value)
+            else:
+                merged[key] = value
+        return merged

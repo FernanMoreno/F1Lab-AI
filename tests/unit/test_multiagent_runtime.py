@@ -61,3 +61,5 @@ def test_propose_mitigations_returns_counterfactuals(tmp_path: Path) -> None:
     assert mitigations
     assert "candidate" in mitigations[0]
     assert "after_failures" in mitigations[0]
+    assert "priority_delta" in mitigations[0]
+    assert "after_priority_score" in mitigations[0]

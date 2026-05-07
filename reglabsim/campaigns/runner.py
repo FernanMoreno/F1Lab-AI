@@ -12,6 +12,7 @@ from reglabsim.campaigns.report import campaign_summary, markdown_summary
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.failures.classifier import FailureClassifier
 from reglabsim.failures.mitigation import MitigationEngine
+from reglabsim.failures.taxonomy import summarize_failures
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.runtime.action_arbitrator import ActionArbitrator
 from reglabsim.runtime.action_validator import ActionValidator
@@ -226,7 +227,11 @@ class CampaignRunner:
                 ).to_dict()
             )
 
-        cars_sorted = sorted(cars, key=lambda item: item.position)
+        steward_log.extend(
+            decision.to_dict()
+            for decision in steward.flush_pending(final_lap=spec.laps, cars=cars)
+        )
+        cars_sorted = sorted(cars, key=lambda item: item.cumulative_time_s + item.penalties_s)
         result = {
             "winner": cars_sorted[0].car_id if cars_sorted else None,
             "final_positions": [car.car_id for car in cars_sorted],
@@ -293,6 +298,7 @@ class CampaignRunner:
         """Generate and evaluate simple mitigations on the same scenario."""
         spec = CampaignSpec.from_dict(run_output["spec"])
         candidates = self._mitigations.propose_candidates(run_output.get("failure_log", []))
+        before_summary = summarize_failures(run_output.get("failure_log", []))
         evaluated: list[dict[str, Any]] = []
         for candidate in candidates:
             regulation_override, enforcement_override = self._mitigations.apply_overrides(
@@ -306,17 +312,34 @@ class CampaignRunner:
                 regulation_override=regulation_override,
                 enforcement_override=enforcement_override,
             )
+            after_summary = summarize_failures(rerun.get("failure_log", []))
             evaluated.append(
                 {
                     "candidate": candidate,
                     "before_failures": len(run_output.get("failure_log", [])),
                     "after_failures": len(rerun.get("failure_log", [])),
+                    "before_priority_score": before_summary["total_priority_score"],
+                    "after_priority_score": after_summary["total_priority_score"],
+                    "priority_delta": round(
+                        before_summary["total_priority_score"]
+                        - after_summary["total_priority_score"],
+                        4,
+                    ),
                     "before_incidents": run_output["metrics"]["incident_count"],
                     "after_incidents": rerun["metrics"]["incident_count"],
+                    "before_summary": before_summary,
+                    "after_summary": after_summary,
                     "rerun_manifest": rerun["manifest"],
                 }
             )
-        evaluated.sort(key=lambda item: (item["after_failures"], item["after_incidents"]))
+        evaluated.sort(
+            key=lambda item: (
+                item["after_priority_score"],
+                item["after_failures"],
+                item["after_incidents"],
+                -item["priority_delta"],
+            )
+        )
         return evaluated
 
     def _build_grid(self, spec: CampaignSpec) -> list[CarRuntimeState]:
