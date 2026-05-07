@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from reglabsim.circuits.base import CircuitModel, CircuitRepository
+from reglabsim.circuits.base import CircuitModel, CircuitRepository, _warn_legacy_api
 from reglabsim.track.geometry import TrackModel as DigitalTrackModel
 from reglabsim.track.segments import TrackSegment as DigitalTrackSegment
 
@@ -90,6 +90,7 @@ class TrackModel:
 
 def create_simple_track_model(circuit: CircuitModel) -> TrackModel:
     """Create a compatibility track model for a legacy circuit."""
+    _warn_legacy_api("create_simple_track_model")
     try:
         digital_track = CircuitRepository.get_track_model(circuit.circuit_id)
     except KeyError:

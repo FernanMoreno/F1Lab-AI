@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from reglabsim.circuits.base import CircuitRepository
 from reglabsim.circuits.track_model import create_simple_track_model
 from reglabsim.track.pack import TrackPackRepository
@@ -30,7 +32,8 @@ def test_track_pack_manifest_matches_curated_tracks() -> None:
 
 def test_circuit_repository_reads_from_track_repository() -> None:
     digital_track = TrackRepository("configs/tracks").get("monaco")
-    circuit = CircuitRepository.get("monaco")
+    with pytest.deprecated_call(match="legacy compatibility API"):
+        circuit = CircuitRepository.get("monaco")
 
     assert circuit.circuit_id == digital_track.track_id
     assert circuit.length_m == digital_track.length_m
@@ -40,10 +43,12 @@ def test_circuit_repository_reads_from_track_repository() -> None:
 
 
 def test_create_simple_track_model_uses_digital_segments_for_known_tracks() -> None:
-    circuit = CircuitRepository.get("baku")
+    with pytest.deprecated_call(match="legacy compatibility API"):
+        circuit = CircuitRepository.get("baku")
     digital_track = TrackRepository("configs/tracks").get("baku")
 
-    compat_track = create_simple_track_model(circuit)
+    with pytest.deprecated_call(match="legacy compatibility API"):
+        compat_track = create_simple_track_model(circuit)
 
     assert compat_track.get_total_segments() == len(digital_track.segments)
     assert compat_track.segments[0].segment_type == digital_track.segments[0].segment_type

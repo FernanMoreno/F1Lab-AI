@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from math import inf
 from pathlib import Path
@@ -10,6 +11,18 @@ from typing import Any, ClassVar
 from reglabsim.track.geometry import TrackModel as DigitalTrackModel
 from reglabsim.track.segments import TrackSegment as DigitalTrackSegment
 from reglabsim.track.track_loader import TrackRepository
+
+
+def _warn_legacy_api(api_name: str) -> None:
+    """Warn when callers use the legacy circuits compatibility layer."""
+    warnings.warn(
+        (
+            f"`reglabsim.circuits.{api_name}` is a legacy compatibility API backed by "
+            "`reglabsim.track`. New code should use `reglabsim.track` directly."
+        ),
+        DeprecationWarning,
+        stacklevel=3,
+    )
 
 
 @dataclass(frozen=True)
@@ -129,6 +142,7 @@ class CircuitRepository:
     @classmethod
     def configure(cls, tracks_dir: str | Path) -> None:
         """Point the compatibility layer at a different track directory."""
+        _warn_legacy_api("CircuitRepository.configure")
         cls._tracks_dir = Path(tracks_dir)
         cls._track_repository = TrackRepository(cls._tracks_dir)
 
@@ -141,11 +155,13 @@ class CircuitRepository:
     @classmethod
     def get_track_model(cls, circuit_id: str) -> DigitalTrackModel:
         """Return the canonical digital track model for a legacy circuit id."""
+        _warn_legacy_api("CircuitRepository.get_track_model")
         return cls._repo().get(circuit_id)
 
     @classmethod
     def get(cls, circuit_id: str) -> CircuitModel:
         """Get a legacy circuit view by id."""
+        _warn_legacy_api("CircuitRepository.get")
         if circuit_id in cls._registered:
             return cls._registered[circuit_id]
         return CircuitModel.from_track_model(cls.get_track_model(circuit_id))
@@ -153,9 +169,11 @@ class CircuitRepository:
     @classmethod
     def list_ids(cls) -> list[str]:
         """List all known circuit ids from curated tracks plus ad-hoc registrations."""
+        _warn_legacy_api("CircuitRepository.list_ids")
         return sorted(set(cls._repo().list_ids()) | set(cls._registered.keys()))
 
     @classmethod
     def register(cls, circuit: CircuitModel) -> None:
         """Register an ad-hoc legacy circuit without touching the curated track pack."""
+        _warn_legacy_api("CircuitRepository.register")
         cls._registered[circuit.circuit_id] = circuit

@@ -212,7 +212,7 @@ class SimulationFacadeImpl:
         return self._car_family_registry[family_id]
 
     def list_circuits(self) -> list[str]:
-        return self._track_repo.list_ids()
+        return self._target_track_ids()
 
     def describe_track(self, track_id: str) -> dict[str, Any]:
         """Return full track metadata and risk/provenance summary."""
@@ -233,7 +233,7 @@ class SimulationFacadeImpl:
 
     def _target_track_ids(self) -> list[str]:
         pack_ids = self._track_pack_repo.list_target_ids()
-        return pack_ids or self.list_circuits()
+        return pack_ids or self._track_repo.list_ids()
 
     def list_condition_profiles(self) -> list[str]:
         """List available condition profile presets."""
