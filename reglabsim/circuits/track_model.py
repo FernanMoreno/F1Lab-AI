@@ -1,66 +1,17 @@
-"""Track model with segments and characteristics.
-
-Provides detailed track modeling for simulation.
-"""
+"""Legacy track-model compatibility layer backed by digital track configs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from reglabsim.circuits.base import CircuitModel
+from reglabsim.circuits.base import CircuitModel, CircuitRepository
+from reglabsim.track.geometry import TrackModel as DigitalTrackModel
+from reglabsim.track.segments import TrackSegment as DigitalTrackSegment
 
 
-@dataclass
-class TrackModel:
-    """Track model with segmented representation.
-
-    Represents a circuit as a series of segments
-    (straights and corners) for simulation.
-
-    Attributes:
-        circuit: Base circuit model.
-        segments: List of track segments.
-    """
-
-    circuit: CircuitModel
-    segments: list[TrackSegment] = field(default_factory=list)
-
-    def get_segment_at_distance(self, distance_m: float) -> TrackSegment:
-        """Get segment at given distance.
-
-        Args:
-            distance_m: Distance along track.
-
-        Returns:
-            TrackSegment at that distance.
-        """
-        for seg in self.segments:
-            if seg.start_distance_m <= distance_m < seg.end_distance_m:
-                return seg
-        # Wrap around for end of track
-        if distance_m >= self.circuit.length_m:
-            return self.segments[0]
-        return self.segments[0]
-
-    def get_total_segments(self) -> int:
-        """Get number of segments."""
-        return len(self.segments)
-
-
-@dataclass
+@dataclass(frozen=True)
 class TrackSegment:
-    """A segment of track with physics properties.
-
-    Attributes:
-        segment_id: Unique segment ID.
-        start_distance_m: Start position in meters.
-        end_distance_m: End position in meters.
-        segment_type: 'straight', 'corner', 'chicane'.
-        length_m: Segment length.
-        corner_radius_m: Corner radius (inf for straight).
-        max_speed_mps: Maximum speed achievable.
-        elevation_change_m: Elevation change across segment.
-    """
+    """Legacy segment representation preserved for older callers."""
 
     segment_id: int
     start_distance_m: float
@@ -71,10 +22,31 @@ class TrackSegment:
     max_speed_mps: float = 0.0
     elevation_change_m: float = 0.0
 
+    @classmethod
+    def from_digital_segment(
+        cls,
+        segment: DigitalTrackSegment,
+        *,
+        segment_index: int,
+    ) -> TrackSegment:
+        """Convert one digital-twin segment into the legacy shape."""
+        return cls(
+            segment_id=segment_index,
+            start_distance_m=segment.start_m,
+            end_distance_m=segment.end_m,
+            segment_type=segment.segment_type,
+            length_m=segment.length_m,
+            corner_radius_m=(
+                float(segment.radius_m) if segment.radius_m is not None else float("inf")
+            ),
+            max_speed_mps=float(segment.metadata.get("estimated_max_speed_mps", 0.0)),
+            elevation_change_m=segment.elevation_delta_m,
+        )
+
     @property
     def is_corner(self) -> bool:
-        """Check if this is a corner segment."""
-        return self.segment_type in ("corner", "chicane")
+        """Check if this is a corner-like segment."""
+        return self.segment_type in ("corner", "chicane", "hairpin", "braking_zone")
 
     @property
     def is_straight(self) -> bool:
@@ -82,50 +54,73 @@ class TrackSegment:
         return self.segment_type == "straight"
 
 
-def create_simple_track_model(circuit: CircuitModel) -> TrackModel:
-    """Create a simple track model from circuit.
+@dataclass
+class TrackModel:
+    """Legacy track model view backed by the digital-twin layer."""
 
-    Generates segments based on circuit properties.
-    Real implementation would use detailed track data.
+    circuit: CircuitModel
+    segments: list[TrackSegment] = field(default_factory=list)
 
-    Args:
-        circuit: Circuit model.
-
-    Returns:
-        TrackModel with segments.
-    """
-    segments = []
-    segment_length = circuit.length_m / (circuit.corners + 3)
-    distance = 0.0
-    segment_id = 0
-
-    # Add some straights
-    for i in range(3):
-        seg = TrackSegment(
-            segment_id=segment_id,
-            start_distance_m=distance,
-            end_distance_m=distance + segment_length * 2,
-            segment_type="straight",
-            length_m=segment_length * 2,
-            max_speed_mps=circuit.avg_speed_kph / 3.6 * 1.2,
+    @classmethod
+    def from_digital_track(cls, track: DigitalTrackModel) -> TrackModel:
+        """Create a legacy track model from a digital track model."""
+        return cls(
+            circuit=CircuitModel.from_track_model(track),
+            segments=[
+                TrackSegment.from_digital_segment(segment, segment_index=index)
+                for index, segment in enumerate(track.segments)
+            ],
         )
-        segments.append(seg)
-        distance += segment_length * 2
-        segment_id += 1
 
-        # Add corner after straight
-        if i < 2:
-            corner_seg = TrackSegment(
+    def get_segment_at_distance(self, distance_m: float) -> TrackSegment:
+        """Get segment at a given distance with lap wrap-around."""
+        if not self.segments:
+            raise IndexError("TrackModel has no segments")
+        for segment in self.segments:
+            if segment.start_distance_m <= distance_m < segment.end_distance_m:
+                return segment
+        if distance_m >= self.circuit.length_m:
+            return self.segments[0]
+        return self.segments[0]
+
+    def get_total_segments(self) -> int:
+        """Get number of segments."""
+        return len(self.segments)
+
+
+def create_simple_track_model(circuit: CircuitModel) -> TrackModel:
+    """Create a compatibility track model for a legacy circuit."""
+    try:
+        digital_track = CircuitRepository.get_track_model(circuit.circuit_id)
+    except KeyError:
+        segments: list[TrackSegment] = []
+        segment_length = circuit.length_m / max(1, circuit.corners + 3)
+        distance = 0.0
+        segment_id = 0
+        for straight_index in range(3):
+            straight = TrackSegment(
                 segment_id=segment_id,
                 start_distance_m=distance,
-                end_distance_m=distance + segment_length,
-                segment_type="corner",
-                length_m=segment_length,
-                corner_radius_m=50.0,
-                max_speed_mps=circuit.avg_speed_kph / 3.6 * 0.8,
+                end_distance_m=distance + segment_length * 2,
+                segment_type="straight",
+                length_m=segment_length * 2,
+                max_speed_mps=circuit.avg_speed_kph / 3.6 * 1.2,
             )
-            segments.append(corner_seg)
-            distance += segment_length
+            segments.append(straight)
+            distance += segment_length * 2
             segment_id += 1
-
-    return TrackModel(circuit=circuit, segments=segments)
+            if straight_index < 2:
+                corner = TrackSegment(
+                    segment_id=segment_id,
+                    start_distance_m=distance,
+                    end_distance_m=distance + segment_length,
+                    segment_type="corner",
+                    length_m=segment_length,
+                    corner_radius_m=50.0,
+                    max_speed_mps=circuit.avg_speed_kph / 3.6 * 0.8,
+                )
+                segments.append(corner)
+                distance += segment_length
+                segment_id += 1
+        return TrackModel(circuit=circuit, segments=segments)
+    return TrackModel.from_digital_track(digital_track)

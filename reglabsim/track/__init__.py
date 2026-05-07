@@ -4,6 +4,7 @@ from reglabsim.track.builder import GeospatialTrackBuilder, TrackPoint
 from reglabsim.track.enrichment import TrackBoundaryProfileEnricher
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskAssessment, LocalRiskModel
+from reglabsim.track.pack import TrackPack, TrackPackEntry, TrackPackRepository
 from reglabsim.track.segments import (
     KerbProfile,
     RunoffProfile,
@@ -22,6 +23,9 @@ __all__ = [
     "RunoffProfile",
     "SegmentRiskProfile",
     "TrackBoundaryProfileEnricher",
+    "TrackPack",
+    "TrackPackEntry",
+    "TrackPackRepository",
     "TrackLimitProfile",
     "TrackModel",
     "TrackPoint",

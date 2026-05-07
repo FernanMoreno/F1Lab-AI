@@ -1,0 +1,63 @@
+name: core_research_target_pack
+version: "2026.05"
+description: Core eight-circuit pack used for digital-twin generation and public primitive validation.
+tracks:
+  - track_id: suzuka
+    build_priority: 1
+    builder_hint: raceway
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - high-speed permanent benchmark
+      - lap and battle calibration anchor
+  - track_id: baku
+    build_priority: 2
+    builder_hint: street_network
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - long-straight street benchmark
+      - closing-speed stress anchor
+  - track_id: monaco
+    build_priority: 3
+    builder_hint: street_network
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - train-formation anchor
+      - narrow-street fidelity driver
+  - track_id: monza
+    build_priority: 4
+    builder_hint: raceway
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - low-drag and energy benchmark
+  - track_id: austria
+    build_priority: 5
+    builder_hint: raceway
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - short-lap repeatability benchmark
+  - track_id: singapore
+    build_priority: 6
+    builder_hint: street_network
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - humid night street benchmark
+  - track_id: barcelona
+    build_priority: 7
+    builder_hint: raceway
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - balanced aero sensitivity benchmark
+  - track_id: silverstone
+    build_priority: 8
+    builder_hint: raceway
+    expected_fidelity_level: 4
+    target_validation_status: seeded_manual_review
+    notes:
+      - fast-flowing high-load benchmark

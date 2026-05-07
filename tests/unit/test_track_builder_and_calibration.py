@@ -488,6 +488,54 @@ def test_facade_track_pack_uses_street_builder_before_curated_fallback(
     assert calls == ["osm", "osm_street"]
 
 
+def test_facade_track_pack_defaults_to_explicit_target_pack_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    facade = create_facade()
+    calls: list[str] = []
+
+    def fake_build_track_seed(**kwargs: object) -> dict[str, object]:
+        track_id = str(kwargs["track_id"])
+        calls.append(track_id)
+        return {
+            "track_id": track_id,
+            "saved_path": str(tmp_path / f"{track_id}.yaml"),
+            "summary": {
+                "track_id": track_id,
+                "name": track_id.title(),
+                "country": "Nowhere",
+                "length_m": 5000.0,
+                "turns": 12,
+                "fidelity_level": 2,
+                "sources": ["generated_seed"],
+                "validation_status": "generated_seed",
+                "fidelity_notes": [],
+                "metadata": {},
+                "segments": [f"{track_id}_01"],
+            },
+        }
+
+    monkeypatch.setattr(facade, "build_track_seed", fake_build_track_seed)
+
+    result = facade.build_track_pack(output_dir=tmp_path)
+
+    assert result["track_pack"] == "core_research_target_pack"
+    assert result["track_pack_version"] == "2026.05"
+    assert result["requested_track_ids"] == [
+        "suzuka",
+        "baku",
+        "monaco",
+        "monza",
+        "austria",
+        "singapore",
+        "barcelona",
+        "silverstone",
+    ]
+    assert calls == result["requested_track_ids"]
+    assert result["track_count"] == 8
+
+
 def test_facade_generated_seed_applies_boundary_profiles(tmp_path: Path) -> None:
     csv_path = tmp_path / "street_seed.csv"
     csv_path.write_text(

@@ -32,6 +32,7 @@ from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
 from reglabsim.track.builder import GeospatialTrackBuilder
 from reglabsim.track.enrichment import TrackBoundaryProfileEnricher
+from reglabsim.track.pack import TrackPackRepository
 from reglabsim.track.track_loader import TrackRepository
 from reglabsim.validation.primitives import PrimitiveValidationCase, PublicPrimitiveCalibrator
 from reglabsim.validation.public_session import PublicSessionValidator
@@ -57,6 +58,7 @@ class SimulationFacadeImpl:
         )
         self._data_dir = Path(data_dir) if data_dir else Path("outputs")
         self._track_repo = TrackRepository(self._config_dir / "tracks")
+        self._track_pack_repo = TrackPackRepository(self._config_dir / "track_pack.yaml")
         self._conditions_repo = ConditionProfileRepository(self._config_dir / "conditions")
         self._regulation_registry: dict[str, Regulation] = {}
         self._regulation_payloads: dict[str, dict[str, Any]] = {}
@@ -228,6 +230,10 @@ class SimulationFacadeImpl:
             "metadata": track.metadata,
             "segments": [segment.segment_id for segment in track.segments],
         }
+
+    def _target_track_ids(self) -> list[str]:
+        pack_ids = self._track_pack_repo.list_target_ids()
+        return pack_ids or self.list_circuits()
 
     def list_condition_profiles(self) -> list[str]:
         """List available condition profile presets."""
@@ -494,7 +500,8 @@ class SimulationFacadeImpl:
         fidelity_level: int = 2,
     ) -> dict[str, Any]:
         """Generate enriched seeds for the configured track pack."""
-        targets = track_ids or self.list_circuits()
+        pack = self._track_pack_repo.load()
+        targets = track_ids or self._target_track_ids()
         output_root = Path(output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
         results: list[dict[str, Any]] = []
@@ -638,6 +645,9 @@ class SimulationFacadeImpl:
                 )
         return {
             "output_dir": str(output_root),
+            "track_pack": pack.name if pack and track_ids is None else None,
+            "track_pack_version": pack.version if pack and track_ids is None else None,
+            "requested_track_ids": targets,
             "track_count": len(results),
             "failure_count": len(failures),
             "warning_count": len(warnings),
