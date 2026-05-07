@@ -1,0 +1,25 @@
+name: public_race_target_pack
+description: Full-race validation pack against public OpenF1 sessions with conditions derived from session weather.
+regulation_id: regulation_2026_refined
+defaults:
+  year: 2024
+  session_type: race
+  mode: llm_event_driven
+  llm_provider: heuristic
+  llm_model: event-driven-fallback
+  prompt_template_version: prompt.v1
+  num_cars: 22
+  seed: 42
+thresholds:
+  mean_overall_score_min: 0.65
+  min_case_overall_score: 0.55
+  mean_lap_mape_pct_max: 10.0
+sessions:
+  - track_id: suzuka
+  - track_id: baku
+  - track_id: monaco
+  - track_id: monza
+  - track_id: austria
+  - track_id: singapore
+  - track_id: barcelona
+  - track_id: silverstone

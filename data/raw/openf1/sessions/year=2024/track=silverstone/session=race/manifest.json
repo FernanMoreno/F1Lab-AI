@@ -1,0 +1,61 @@
+{
+  "columns": [
+    "session_key",
+    "session_type",
+    "session_name",
+    "date_start",
+    "date_end",
+    "meeting_key",
+    "circuit_key",
+    "circuit_short_name",
+    "country_key",
+    "country_code",
+    "country_name",
+    "location",
+    "gmt_offset",
+    "year",
+    "is_cancelled",
+    "source",
+    "dataset_name",
+    "track_id"
+  ],
+  "created_at_utc": "2026-05-07T19:32:59.035900+00:00",
+  "data_path": "data\\raw\\openf1\\sessions\\year=2024\\track=silverstone\\session=race\\data.parquet",
+  "dataset_name": "sessions",
+  "layer": "raw",
+  "manifest_path": "data\\raw\\openf1\\sessions\\year=2024\\track=silverstone\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "raw",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1240,
+      "session_key": 9558,
+      "session_type": "race",
+      "track_id": "silverstone",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 2,
+      "circuit_short_name": "Silverstone",
+      "country_code": "GBR",
+      "country_key": 2,
+      "country_name": "United Kingdom",
+      "dataset_name": "sessions",
+      "date_end": "2024-07-07T16:00:00+00:00",
+      "date_start": "2024-07-07T14:00:00+00:00",
+      "gmt_offset": "01:00:00",
+      "is_cancelled": false,
+      "location": "Silverstone",
+      "meeting_key": 1240,
+      "session_key": 9558,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "silverstone",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=silverstone/session=race",
+  "row_count": 1,
+  "source": "openf1"
+}

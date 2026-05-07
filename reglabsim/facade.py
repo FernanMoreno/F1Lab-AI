@@ -35,6 +35,10 @@ from reglabsim.track.enrichment import TrackBoundaryProfileEnricher
 from reglabsim.track.pack import TrackPackRepository
 from reglabsim.track.track_loader import TrackRepository
 from reglabsim.validation.primitives import PrimitiveValidationCase, PublicPrimitiveCalibrator
+from reglabsim.validation.public_race_pack import (
+    PublicRacePackValidator,
+    PublicRaceValidationCase,
+)
 from reglabsim.validation.public_session import PublicSessionValidator
 from reglabsim.vehicle.car_family import CarFamily
 
@@ -798,6 +802,69 @@ class SimulationFacadeImpl:
             cases=cases,
             regulation_id=effective_regulation,
             primitives=[str(value) for value in primitives_raw],
+            output_dir=output_dir,
+            pack_name=pack_name,
+            thresholds=thresholds_raw if isinstance(thresholds_raw, dict) else None,
+            required_tracks=required_tracks,
+        )
+
+    def validate_public_race_pack(
+        self,
+        *,
+        config_path: str | Path,
+        data_root: str = "data",
+        output_dir: str | Path | None = None,
+        ingest_if_missing: bool = True,
+        regulation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run full-race validation over a multi-circuit public session pack."""
+        raw = self._load_yaml(config_path)
+        sessions_raw = raw.get("sessions", [])
+        if not isinstance(sessions_raw, list) or not sessions_raw:
+            raise ValueError("Race validation config must define a non-empty 'sessions' list")
+        defaults_raw = raw.get("defaults", {})
+        if defaults_raw and not isinstance(defaults_raw, dict):
+            raise ValueError("Race validation config 'defaults' must be a mapping")
+        cases: list[PublicRaceValidationCase] = []
+        for session_data in sessions_raw:
+            if not isinstance(session_data, dict):
+                raise ValueError("Each race validation session entry must be a mapping")
+            cases.append(
+                PublicRaceValidationCase.from_dict(
+                    session_data,
+                    defaults=defaults_raw if isinstance(defaults_raw, dict) else None,
+                )
+            )
+        effective_regulation = regulation_id or str(
+            raw.get("regulation_id", "regulation_2026_refined")
+        )
+        thresholds_raw = raw.get("thresholds", {})
+        if thresholds_raw and not isinstance(thresholds_raw, dict):
+            raise ValueError("Race validation config 'thresholds' must be a mapping")
+        pack_name = str(raw.get("name", "public_race_target_pack"))
+        required_tracks = list(dict.fromkeys(case.track_id for case in cases))
+
+        if ingest_if_missing:
+            seen_queries: set[tuple[int, str, str]] = set()
+            for case in cases:
+                dedupe_key = (case.year, case.track_id, case.session_type)
+                if dedupe_key in seen_queries:
+                    continue
+                seen_queries.add(dedupe_key)
+                self.ingest_public_session_data(
+                    year=case.year,
+                    track_id=case.track_id,
+                    session_type=case.session_type,
+                    data_root=data_root,
+                )
+
+        validator = PublicRacePackValidator(
+            runner=self._campaign_runner(),
+            data_root=data_root,
+        )
+        return validator.validate_pack(
+            cases=cases,
+            regulation_id=effective_regulation,
             output_dir=output_dir,
             pack_name=pack_name,
             thresholds=thresholds_raw if isinstance(thresholds_raw, dict) else None,

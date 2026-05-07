@@ -1,0 +1,58 @@
+{
+  "columns": [
+    "date",
+    "session_key",
+    "y",
+    "z",
+    "x",
+    "meeting_key",
+    "driver_number",
+    "source",
+    "dataset_name",
+    "query_year",
+    "query_track_id",
+    "query_session_type",
+    "query_session_key",
+    "query_meeting_key"
+  ],
+  "created_at_utc": "2026-05-07T19:28:29.737002+00:00",
+  "data_path": "data\\silver\\openf1\\location\\year=2024\\track=austria\\session=race\\data.parquet",
+  "dataset_name": "location",
+  "layer": "silver",
+  "manifest_path": "data\\silver\\openf1\\location\\year=2024\\track=austria\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "silver",
+    "pipeline": "location_standard_pipeline",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1239,
+      "session_key": 9550,
+      "session_type": "race",
+      "track_id": "austria",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 19,
+      "circuit_short_name": "Spielberg",
+      "country_code": "AUT",
+      "country_key": 17,
+      "country_name": "Austria",
+      "dataset_name": "sessions",
+      "date_end": "2024-06-30T15:00:00+00:00",
+      "date_start": "2024-06-30T13:00:00+00:00",
+      "gmt_offset": "02:00:00",
+      "is_cancelled": false,
+      "location": "Spielberg",
+      "meeting_key": 1239,
+      "session_key": 9550,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "austria",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=austria/session=race",
+  "row_count": 654222,
+  "source": "openf1"
+}
