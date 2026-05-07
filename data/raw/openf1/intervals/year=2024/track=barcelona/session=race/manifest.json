@@ -1,0 +1,51 @@
+{
+  "columns": [
+    "date",
+    "session_key",
+    "interval",
+    "meeting_key",
+    "gap_to_leader",
+    "driver_number",
+    "source",
+    "dataset_name"
+  ],
+  "created_at_utc": "2026-05-07T18:31:04.134799+00:00",
+  "data_path": "data\\raw\\openf1\\intervals\\year=2024\\track=barcelona\\session=race\\data.parquet",
+  "dataset_name": "intervals",
+  "layer": "raw",
+  "manifest_path": "data\\raw\\openf1\\intervals\\year=2024\\track=barcelona\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "raw",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1238,
+      "session_key": 9539,
+      "session_type": "race",
+      "track_id": "barcelona",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 15,
+      "circuit_short_name": "Catalunya",
+      "country_code": "ESP",
+      "country_key": 1,
+      "country_name": "Spain",
+      "dataset_name": "sessions",
+      "date_end": "2024-06-23T15:00:00+00:00",
+      "date_start": "2024-06-23T13:00:00+00:00",
+      "gmt_offset": "02:00:00",
+      "is_cancelled": false,
+      "location": "Barcelona",
+      "meeting_key": 1238,
+      "session_key": 9539,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "barcelona",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=barcelona/session=race",
+  "row_count": 25994,
+  "source": "openf1"
+}

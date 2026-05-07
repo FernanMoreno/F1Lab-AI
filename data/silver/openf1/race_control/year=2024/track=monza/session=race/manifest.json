@@ -1,0 +1,62 @@
+{
+  "columns": [
+    "meeting_key",
+    "session_key",
+    "date",
+    "driver_number",
+    "lap_number",
+    "category",
+    "flag",
+    "scope",
+    "sector",
+    "qualifying_phase",
+    "message",
+    "source",
+    "dataset_name",
+    "query_year",
+    "query_track_id",
+    "query_session_type",
+    "query_session_key",
+    "query_meeting_key"
+  ],
+  "created_at_utc": "2026-05-07T18:26:38.244490+00:00",
+  "data_path": "data\\silver\\openf1\\race_control\\year=2024\\track=monza\\session=race\\data.parquet",
+  "dataset_name": "race_control",
+  "layer": "silver",
+  "manifest_path": "data\\silver\\openf1\\race_control\\year=2024\\track=monza\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "silver",
+    "pipeline": "race_control_standard_pipeline",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1244,
+      "session_key": 9590,
+      "session_type": "race",
+      "track_id": "monza",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 39,
+      "circuit_short_name": "Monza",
+      "country_code": "ITA",
+      "country_key": 13,
+      "country_name": "Italy",
+      "dataset_name": "sessions",
+      "date_end": "2024-09-01T15:00:00+00:00",
+      "date_start": "2024-09-01T13:00:00+00:00",
+      "gmt_offset": "02:00:00",
+      "is_cancelled": false,
+      "location": "Monza",
+      "meeting_key": 1244,
+      "session_key": 9590,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "monza",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=monza/session=race",
+  "row_count": 61,
+  "source": "openf1"
+}

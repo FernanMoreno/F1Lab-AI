@@ -1,0 +1,61 @@
+{
+  "columns": [
+    "date",
+    "session_key",
+    "humidity",
+    "pressure",
+    "rainfall",
+    "track_temperature",
+    "wind_speed",
+    "meeting_key",
+    "wind_direction",
+    "air_temperature",
+    "source",
+    "dataset_name",
+    "query_year",
+    "query_track_id",
+    "query_session_type",
+    "query_session_key",
+    "query_meeting_key"
+  ],
+  "created_at_utc": "2026-05-07T18:24:40.468315+00:00",
+  "data_path": "data\\silver\\openf1\\weather\\year=2024\\track=suzuka\\session=race\\data.parquet",
+  "dataset_name": "weather",
+  "layer": "silver",
+  "manifest_path": "data\\silver\\openf1\\weather\\year=2024\\track=suzuka\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "silver",
+    "pipeline": "weather_standard_pipeline",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1232,
+      "session_key": 9496,
+      "session_type": "race",
+      "track_id": "suzuka",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 46,
+      "circuit_short_name": "Suzuka",
+      "country_code": "JPN",
+      "country_key": 4,
+      "country_name": "Japan",
+      "dataset_name": "sessions",
+      "date_end": "2024-04-07T07:00:00+00:00",
+      "date_start": "2024-04-07T05:00:00+00:00",
+      "gmt_offset": "09:00:00",
+      "is_cancelled": false,
+      "location": "Suzuka",
+      "meeting_key": 1232,
+      "session_key": 9496,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "suzuka",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=suzuka/session=race",
+  "row_count": 181,
+  "source": "openf1"
+}

@@ -1,0 +1,63 @@
+{
+  "columns": [
+    "meeting_key",
+    "session_key",
+    "driver_number",
+    "lap_number",
+    "date_start",
+    "duration_sector_1",
+    "duration_sector_2",
+    "duration_sector_3",
+    "i1_speed",
+    "i2_speed",
+    "is_pit_out_lap",
+    "lap_duration",
+    "segments_sector_1",
+    "segments_sector_2",
+    "segments_sector_3",
+    "st_speed",
+    "source",
+    "dataset_name",
+    "track_id",
+    "session_name"
+  ],
+  "created_at_utc": "2026-05-07T18:33:51.029576+00:00",
+  "data_path": "data\\raw\\openf1\\laps\\year=2024\\track=monaco\\session=race\\data.parquet",
+  "dataset_name": "laps",
+  "layer": "raw",
+  "manifest_path": "data\\raw\\openf1\\laps\\year=2024\\track=monaco\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "raw",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1236,
+      "session_key": 9523,
+      "session_type": "race",
+      "track_id": "monaco",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 22,
+      "circuit_short_name": "Monte Carlo",
+      "country_code": "MON",
+      "country_key": 114,
+      "country_name": "Monaco",
+      "dataset_name": "sessions",
+      "date_end": "2024-05-26T15:00:00+00:00",
+      "date_start": "2024-05-26T13:00:00+00:00",
+      "gmt_offset": "02:00:00",
+      "is_cancelled": false,
+      "location": "Monaco",
+      "meeting_key": 1236,
+      "session_key": 9523,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "monaco",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=monaco/session=race",
+  "row_count": 1237,
+  "source": "openf1"
+}

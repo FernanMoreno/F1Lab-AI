@@ -1,0 +1,55 @@
+{
+  "columns": [
+    "date",
+    "session_key",
+    "humidity",
+    "pressure",
+    "rainfall",
+    "track_temperature",
+    "wind_speed",
+    "meeting_key",
+    "wind_direction",
+    "air_temperature",
+    "source",
+    "dataset_name"
+  ],
+  "created_at_utc": "2026-05-07T18:28:50.524802+00:00",
+  "data_path": "data\\raw\\openf1\\weather\\year=2024\\track=baku\\session=race\\data.parquet",
+  "dataset_name": "weather",
+  "layer": "raw",
+  "manifest_path": "data\\raw\\openf1\\weather\\year=2024\\track=baku\\session=race\\manifest.json",
+  "metadata": {
+    "ingestion_stage": "raw",
+    "query": {
+      "driver_numbers": [],
+      "meeting_key": 1245,
+      "session_key": 9598,
+      "session_type": "race",
+      "track_id": "baku",
+      "year": 2024
+    },
+    "resolved_session": {
+      "circuit_key": 144,
+      "circuit_short_name": "Baku",
+      "country_code": "AZE",
+      "country_key": 30,
+      "country_name": "Azerbaijan",
+      "dataset_name": "sessions",
+      "date_end": "2024-09-15T13:00:00+00:00",
+      "date_start": "2024-09-15T11:00:00+00:00",
+      "gmt_offset": "04:00:00",
+      "is_cancelled": false,
+      "location": "Baku",
+      "meeting_key": 1245,
+      "session_key": 9598,
+      "session_name": "Race",
+      "session_type": "Race",
+      "source": "openf1",
+      "track_id": "baku",
+      "year": 2024
+    }
+  },
+  "partition": "year=2024/track=baku/session=race",
+  "row_count": 152,
+  "source": "openf1"
+}
