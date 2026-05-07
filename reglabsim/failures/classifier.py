@@ -209,7 +209,11 @@ class FailureClassifier:
         tags = set(event.get("details", {}).get("recommended_failure_tags", []))
         if "unsafe_closing_speed" in tags and not responses:
             return True
-        return event.get("event_type") == "unsafe_rejoin" and not responses
+        return event.get("event_type") in {
+            "unsafe_rejoin",
+            "unsafe_defending",
+            "forcing_off_track",
+        } and not responses
 
     def _severity_from_event(self, event: dict[str, Any]) -> str:
         severity = event.get("details", {}).get("impact_severity")
@@ -240,6 +244,8 @@ class FailureClassifier:
     def _repeatability(self, failure_type: str, event: dict[str, Any]) -> float:
         if failure_type in {"track_limits_exploit", "grey_area_exploit"}:
             return 0.78
+        if failure_type in {"unsafe_defending_exploit", "forcing_off_track_exploit"}:
+            return 0.66
         if event.get("event_type") == "incident":
             return 0.55
         return 0.72
@@ -247,6 +253,10 @@ class FailureClassifier:
     def _exploitability(self, failure_type: str, event: dict[str, Any]) -> float:
         if failure_type == "grey_area_exploit":
             return 0.76
+        if failure_type == "unsafe_defending_exploit":
+            return 0.72
+        if failure_type == "forcing_off_track_exploit":
+            return 0.62
         if "weather" in failure_type:
             return 0.45
         if failure_type in {"track_limits_exploit", "battery_dominance"}:
@@ -254,11 +264,19 @@ class FailureClassifier:
         return 0.68 if event.get("event_type") != "unsafe_rejoin" else 0.42
 
     def _sporting_impact(self, failure_type: str) -> str:
-        if failure_type in {"track_limits_exploit", "battery_dominance", "grey_area_exploit"}:
+        if failure_type in {
+            "track_limits_exploit",
+            "battery_dominance",
+            "grey_area_exploit",
+            "unsafe_defending_exploit",
+            "forcing_off_track_exploit",
+        }:
             return "high"
         return "medium"
 
     def _safety_impact(self, failure_type: str) -> str:
+        if failure_type == "forcing_off_track_exploit":
+            return "critical"
         if "unsafe" in failure_type or "no_escape" in failure_type:
             return "critical"
         if failure_type in {"wind_active_aero_instability", "weather_amplified_failure"}:
@@ -276,7 +294,7 @@ class FailureClassifier:
                 return "high"
             if evidence_score >= 0.55:
                 return "medium"
-        if event.get("event_type") == "unsafe_rejoin":
+        if event.get("event_type") in {"unsafe_rejoin", "unsafe_defending", "forcing_off_track"}:
             return "high"
         return "medium"
 
@@ -287,6 +305,8 @@ class FailureClassifier:
             "wind_active_aero_instability": "active_aero_transition_window",
             "track_limits_exploit": "track_limit_warning_threshold",
             "no_escape_zone_failure": "overtake_mode_activation_gap_s",
+            "unsafe_defending_exploit": "defending_space_requirement_m",
+            "forcing_off_track_exploit": "defending_space_requirement_m",
             "grey_area_exploit": "steward_adjudication_window",
         }
         return mapping.get(failure_type, "regulation_2026_behavior")

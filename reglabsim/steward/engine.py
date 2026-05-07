@@ -13,6 +13,7 @@ DEFAULT_ENFORCEMENT_POLICY: dict[str, Any] = {
     "detection_probability": {
         "track_limits": 0.98,
         "unsafe_defending": 0.80,
+        "forcing_off_track": 0.88,
         "active_aero_misuse": 0.70,
         "unsafe_rejoin": 0.85,
         "unsafe_closing_speed": 0.82,
@@ -28,12 +29,18 @@ DEFAULT_ENFORCEMENT_POLICY: dict[str, Any] = {
         "track_limits_penalty": 0,
         "warning_for_unsafe_closing_speed": 1,
         "unsafe_closing_speed_penalty": 1,
+        "unsafe_defending_warning": 0,
+        "unsafe_defending_penalty": 1,
+        "forcing_off_track_warning": 0,
+        "forcing_off_track_penalty": 1,
         "unsafe_rejoin_warning": 0,
         "unsafe_rejoin_penalty": 1,
     },
     "penalties_seconds": {
         "track_limits_penalty": 5.0,
         "unsafe_closing_speed_penalty": 10.0,
+        "unsafe_defending_penalty": 5.0,
+        "forcing_off_track_penalty": 10.0,
         "unsafe_rejoin_penalty": 5.0,
     },
     "track_limits_penalty_after": 4,
@@ -136,6 +143,14 @@ class StewardEngine:
             )
         if event.event_type == "unsafe_rejoin":
             return self._unsafe_rejoin_decision(
+                lap=lap,
+                car=car,
+                event=event,
+                visibility_m=visibility_m,
+                rain_intensity_mm_h=rain_intensity_mm_h,
+            )
+        if event.event_type in {"unsafe_defending", "forcing_off_track"}:
+            return self._defending_decision(
                 lap=lap,
                 car=car,
                 event=event,
@@ -338,6 +353,82 @@ class StewardEngine:
             details=details,
         )
 
+    def _defending_decision(
+        self,
+        *,
+        lap: int,
+        car: CarRuntimeState,
+        event: RaceEvent,
+        visibility_m: float,
+        rain_intensity_mm_h: float,
+    ) -> StewardDecision | None:
+        detection_probability = self._detection_probability(
+            infraction=event.event_type,
+            event_probability=event.details.get("steward_detectability", 1.0),
+            visibility_m=visibility_m,
+            rain_intensity_mm_h=rain_intensity_mm_h,
+        )
+        if not self._detected(detection_probability):
+            return None
+
+        evidence_score = self._defending_evidence_score(event.details)
+        grey_area_score = self._grey_area_score(
+            event=event,
+            evidence_score=evidence_score,
+            visibility_m=visibility_m,
+            rain_intensity_mm_h=rain_intensity_mm_h,
+        )
+        severity = str(event.details.get("impact_severity", "medium"))
+        strictness = self._strictness_factor()
+        infraction = event.event_type
+        warning_type = f"{infraction}_warning"
+        penalty_type = f"{infraction}_penalty"
+
+        decision_type = warning_type
+        penalty = 0.0
+        if infraction == "forcing_off_track":
+            if severity in {"high", "critical"} or evidence_score >= 0.74:
+                if grey_area_score >= 0.74 and strictness <= 1.0 and severity != "critical":
+                    decision_type = warning_type
+                else:
+                    decision_type = penalty_type
+                    penalty = self._penalty_seconds(penalty_type) * strictness
+            elif evidence_score < 0.56:
+                return None
+        else:
+            if severity == "critical" or evidence_score >= 0.84:
+                decision_type = penalty_type
+                penalty = self._penalty_seconds(penalty_type) * strictness
+            elif severity == "high" or evidence_score >= 0.66:
+                if grey_area_score >= 0.70 and strictness <= 1.0:
+                    decision_type = warning_type
+                else:
+                    decision_type = penalty_type
+                    penalty = self._penalty_seconds(penalty_type) * 0.5 * strictness
+            elif evidence_score < 0.55:
+                return None
+
+        details = {
+            **event.details,
+            "source_event_type": event.event_type,
+            "source_event_lap": event.lap,
+            "segment_id": event.segment_id,
+            "detection_probability_adjusted": detection_probability,
+            "evidence_score": evidence_score,
+            "grey_area_score": grey_area_score,
+            "visibility_m": visibility_m,
+            "rain_intensity_mm_h": rain_intensity_mm_h,
+        }
+        return StewardDecision(
+            schema_version="steward_decision.v1",
+            decision_type=decision_type,
+            lap=lap,
+            car_id=car.car_id,
+            penalty_s=penalty,
+            warning_count=car.warnings,
+            details=details,
+        )
+
     def _apply_or_queue(
         self,
         decision: StewardDecision,
@@ -442,6 +533,23 @@ class StewardEngine:
             3,
         )
 
+    def _defending_evidence_score(self, details: dict[str, Any]) -> float:
+        battle_pressure = float(details.get("battle_pressure", 0.0))
+        closing_speed = float(details.get("closing_speed_kph", 0.0))
+        room_margin = float(details.get("available_room_margin_m", 1.5))
+        runoff_risk = self._risk_numeric(str(details.get("runoff_risk", "medium")))
+        return round(
+            min(
+                1.0,
+                0.24
+                + battle_pressure * 0.4
+                + min(0.18, max(0.0, (closing_speed - 20.0) / 55.0))
+                + runoff_risk * 0.12
+                + max(0.0, 1.0 - min(room_margin, 1.6) / 1.6) * 0.18,
+            ),
+            3,
+        )
+
     def _grey_area_score(
         self,
         *,
@@ -455,7 +563,11 @@ class StewardEngine:
         warning_bias = self._grey_area_bias("warning")
         weather_noise = min(0.28, rain_intensity_mm_h / 25.0)
         visibility_noise = 0.22 if visibility_m < 450 else 0.08 if visibility_m < 700 else 0.0
-        event_noise = 0.06 if event.event_type == "unsafe_rejoin" else 0.0
+        event_noise = (
+            0.08
+            if event.event_type in {"unsafe_rejoin", "unsafe_defending", "forcing_off_track"}
+            else 0.0
+        )
         signal_margin = max(0.0, 0.75 - evidence_score)
         return round(
             min(
@@ -510,6 +622,14 @@ class StewardEngine:
 
     def _penalty_seconds(self, penalty_key: str) -> float:
         return float(self._enforcement.get("penalties_seconds", {}).get(penalty_key, 0.0))
+
+    def _risk_numeric(self, value: str) -> float:
+        return {
+            "low": 0.2,
+            "medium": 0.45,
+            "high": 0.7,
+            "critical": 0.9,
+        }.get(value, 0.45)
 
     def _merge_nested(self, target: dict[str, Any], updates: dict[str, Any]) -> None:
         for key, value in updates.items():

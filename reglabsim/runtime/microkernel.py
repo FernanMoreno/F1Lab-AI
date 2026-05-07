@@ -15,6 +15,7 @@ from reglabsim.conditions.scenarios import (
 from reglabsim.runtime.schema import CarRuntimeState, RaceAction, RaceEvent, RaceStateSnapshot
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskModel
+from reglabsim.track.segments import TrackSegment
 from reglabsim.vehicle.ers import ERSModel
 from reglabsim.vehicle.tyres import TyreModel, TyreState
 
@@ -41,6 +42,7 @@ DEFAULT_BATTLE_CALIBRATION = {
     "closing_speed_scale": 1.0,
     "incident_risk_scale": 1.0,
     "track_limit_scale": 1.0,
+    "defense_event_scale": 1.0,
 }
 
 
@@ -383,6 +385,18 @@ class RaceMicrokernel:
                         ):
                             defender.retired = True
                             battle_details["retired_car"] = defender.car_id
+                defending_event = self._defending_infraction_event(
+                    lap=lap,
+                    segment=segment,
+                    attacker=attacker,
+                    defender=defender,
+                    attacker_action=actions[attacker.car_id],
+                    defender_action=actions[defender.car_id],
+                    weather=weather,
+                    track_state=track_state,
+                    closing_speed_kph=closing_speed_kph,
+                    adjusted_risk=adjusted_risk,
+                )
                 events.append(
                     RaceEvent(
                         event_type=event_type,
@@ -394,6 +408,8 @@ class RaceMicrokernel:
                         details=battle_details,
                     )
                 )
+                if defending_event is not None:
+                    events.append(defending_event)
 
         for car in active_cars:
             if car.damage > 0.5 and self._rng.random() < 0.08:
@@ -422,3 +438,87 @@ class RaceMicrokernel:
             "silverstone": 20.5,
         }
         return penalties.get(track_id, 21.0)
+
+    def _defending_infraction_event(
+        self,
+        *,
+        lap: int,
+        segment: TrackSegment,
+        attacker: CarRuntimeState,
+        defender: CarRuntimeState,
+        attacker_action: RaceAction,
+        defender_action: RaceAction,
+        weather: WeatherState,
+        track_state: TrackState,
+        closing_speed_kph: float,
+        adjusted_risk: float,
+    ) -> RaceEvent | None:
+        if not defender_action.defend or not attacker_action.attack:
+            return None
+        if defender_action.risk_level < 0.55:
+            return None
+
+        width_pressure = min(1.0, max(0.0, (12.5 - segment.width_m) / 4.5))
+        side_risk = RISK_NUMERIC.get(segment.risk.side_by_side_risk, 0.45)
+        runoff_risk = RISK_NUMERIC.get(segment.runoff.rejoin_risk, 0.45)
+        closing_pressure = min(1.0, max(0.0, (closing_speed_kph - 18.0) / 45.0))
+        wet_pressure = min(1.0, track_state.wetness_level)
+        battle_pressure = min(
+            1.0,
+            (
+                0.15
+                + defender_action.risk_level * 0.35
+                + closing_pressure * 0.18
+                + width_pressure * 0.16
+                + side_risk * 0.12
+                + runoff_risk * 0.08
+                + wet_pressure * 0.08
+                + adjusted_risk * 0.12
+            )
+            * self._battle_calibration["defense_event_scale"],
+        )
+        if battle_pressure < 0.58:
+            return None
+
+        available_room_margin_m = round(
+            max(0.0, segment.width_m - 8.6 - battle_pressure * 1.7),
+            3,
+        )
+        event_type = "unsafe_defending"
+        failure_type = "unsafe_defending_exploit"
+        if (
+            battle_pressure >= 0.82
+            or (width_pressure >= 0.5 and runoff_risk >= 0.45 and closing_pressure >= 0.5)
+            or available_room_margin_m < 0.9
+        ):
+            event_type = "forcing_off_track"
+            failure_type = "forcing_off_track_exploit"
+
+        impact_severity = "medium"
+        if battle_pressure >= 0.9 or (event_type == "forcing_off_track" and runoff_risk >= 0.7):
+            impact_severity = "critical"
+        elif battle_pressure >= 0.72 or event_type == "forcing_off_track":
+            impact_severity = "high"
+
+        details = {
+            "attacker_id": attacker.car_id,
+            "defender_id": defender.car_id,
+            "closing_speed_kph": closing_speed_kph,
+            "battle_pressure": round(battle_pressure, 3),
+            "available_room_margin_m": available_room_margin_m,
+            "runoff_type": segment.runoff.type,
+            "runoff_risk": segment.runoff.rejoin_risk,
+            "segment_name": segment.name,
+            "impact_severity": impact_severity,
+            "steward_detectability": round(max(0.45, 0.94 - width_pressure * 0.1), 3),
+            "recommended_failure_tags": [failure_type],
+            "attacker_forced_off_track": event_type == "forcing_off_track",
+            "visibility_m": weather.visibility_m,
+        }
+        return RaceEvent(
+            event_type=event_type,
+            lap=lap,
+            car_id=defender.car_id,
+            segment_id=segment.segment_id,
+            details=details,
+        )

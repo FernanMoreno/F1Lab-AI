@@ -417,12 +417,20 @@ class CampaignRunner:
         incidents = [event for event in event_log if event["event_type"] == "incident"]
         attack_events = [event for event in event_log if event["event_type"] == "attack_phase"]
         track_limits = [event for event in event_log if event["event_type"] == "track_limit_breach"]
+        unsafe_defending = [
+            event for event in event_log if event["event_type"] == "unsafe_defending"
+        ]
+        forcing_off_track = [
+            event for event in event_log if event["event_type"] == "forcing_off_track"
+        ]
         avg_damage = round(sum(car.damage for car in cars) / max(len(cars), 1), 4)
         return {
             "total_overtakes": len(overtakes),
             "incident_count": len(incidents),
             "attack_events": len(attack_events),
             "track_limit_breaches": len(track_limits),
+            "unsafe_defending_events": len(unsafe_defending),
+            "forcing_off_track_events": len(forcing_off_track),
             "avg_closing_speed_kph": round(
                 sum(
                     event["details"].get("closing_speed_kph", 0.0)

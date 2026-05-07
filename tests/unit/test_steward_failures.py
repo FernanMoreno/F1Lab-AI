@@ -6,8 +6,31 @@ import yaml
 
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.failures.classifier import FailureClassifier
+from reglabsim.failures.mitigation import MitigationEngine
 from reglabsim.runtime.schema import CarRuntimeState, RaceEvent
 from reglabsim.steward.engine import StewardEngine
+
+
+def _car_state(car_id: str = "car_01") -> CarRuntimeState:
+    return CarRuntimeState(
+        car_id=car_id,
+        driver_id=car_id.replace("car", "driver"),
+        team_id="team_01",
+        family_id="family_a",
+        position=1,
+        lap=0,
+        gap_to_leader_s=0.0,
+        gap_ahead_s=0.0,
+        gap_behind_s=0.5,
+        tyre_compound="C3",
+        tyre_age_laps=0,
+        tyre_wear=0.0,
+        ers_soc=0.8,
+        fuel_mass_kg=100.0,
+        aero_mode="straight",
+        last_lap_time_s=0.0,
+        cumulative_time_s=0.0,
+    )
 
 
 def test_campaign_spec_merges_default_steward_policy(tmp_path: Path) -> None:
@@ -54,27 +77,7 @@ def test_steward_applies_delayed_penalty_on_next_lap() -> None:
             "decision_latency_laps": {"unsafe_rejoin_penalty": 1},
         }
     )
-    cars = [
-        CarRuntimeState(
-            car_id="car_01",
-            driver_id="driver_01",
-            team_id="team_01",
-            family_id="family_a",
-            position=1,
-            lap=0,
-            gap_to_leader_s=0.0,
-            gap_ahead_s=0.0,
-            gap_behind_s=0.5,
-            tyre_compound="C3",
-            tyre_age_laps=0,
-            tyre_wear=0.0,
-            ers_soc=0.8,
-            fuel_mass_kg=100.0,
-            aero_mode="straight",
-            last_lap_time_s=0.0,
-            cumulative_time_s=0.0,
-        )
-    ]
+    cars = [_car_state()]
     event = RaceEvent(
         event_type="unsafe_rejoin",
         lap=1,
@@ -101,6 +104,43 @@ def test_steward_applies_delayed_penalty_on_next_lap() -> None:
     assert lap_two[0].decision_type == "unsafe_rejoin_penalty"
     assert lap_two[0].details["source_event_lap"] == 1
     assert lap_two[0].details["effective_lap"] == 2
+    assert cars[0].penalties_s > 0.0
+
+
+def test_steward_penalizes_forcing_off_track() -> None:
+    engine = StewardEngine(
+        {
+            "detection_probability": {"forcing_off_track": 1.0},
+            "decision_latency_laps": {"forcing_off_track_penalty": 0},
+        }
+    )
+    cars = [_car_state()]
+    event = RaceEvent(
+        event_type="forcing_off_track",
+        lap=5,
+        car_id="car_01",
+        segment_id="t2_exit",
+        details={
+            "battle_pressure": 0.91,
+            "closing_speed_kph": 64.0,
+            "available_room_margin_m": 0.55,
+            "runoff_risk": "high",
+            "impact_severity": "high",
+            "steward_detectability": 0.96,
+            "recommended_failure_tags": ["forcing_off_track_exploit"],
+        },
+    )
+
+    decisions = engine.adjudicate(
+        lap=5,
+        events=[event],
+        cars=cars,
+        weather={"visibility_m": 1000.0, "rain_intensity_mm_h": 0.0},
+    )
+
+    assert len(decisions) == 1
+    assert decisions[0].decision_type == "forcing_off_track_penalty"
+    assert decisions[0].penalty_s > 0.0
     assert cars[0].penalties_s > 0.0
 
 
@@ -132,3 +172,47 @@ def test_failure_classifier_marks_missing_steward_response_as_grey_area() -> Non
 
     assert "unsafe_closing_speed" in failure_types
     assert "grey_area_exploit" in failure_types
+
+
+def test_failure_classifier_marks_missing_defending_response_as_grey_area() -> None:
+    classifier = FailureClassifier()
+    run_output = {
+        "manifest": {"track_id": "monaco"},
+        "conditions": {"name": "street_dry"},
+        "enforcement": {"steward_strictness": "medium"},
+        "event_log": [
+            {
+                "event_type": "forcing_off_track",
+                "lap": 7,
+                "car_id": "car_01",
+                "segment_id": "casino_exit",
+                "details": {
+                    "impact_severity": "high",
+                    "battle_pressure": 0.88,
+                    "available_room_margin_m": 0.6,
+                    "recommended_failure_tags": ["forcing_off_track_exploit"],
+                },
+            }
+        ],
+        "steward_log": [],
+    }
+
+    failures = classifier.classify(run_output)
+    failure_types = [failure.failure_type for failure in failures]
+
+    assert "forcing_off_track_exploit" in failure_types
+    assert "grey_area_exploit" in failure_types
+
+
+def test_mitigation_engine_proposes_defending_controls() -> None:
+    mitigations = MitigationEngine().propose_candidates(
+        [
+            {"failure_type": "unsafe_defending_exploit"},
+            {"failure_type": "forcing_off_track_exploit"},
+        ]
+    )
+
+    names = [candidate["name"] for candidate in mitigations]
+
+    assert "tighten_defending_enforcement" in names
+    assert "mandate_more_racing_room" in names

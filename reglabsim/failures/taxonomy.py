@@ -12,6 +12,8 @@ FAILURE_TYPES = {
     "track_limits_exploit",
     "kerb_abuse_exploit",
     "unsafe_rejoin_exploit",
+    "unsafe_defending_exploit",
+    "forcing_off_track_exploit",
     "wind_active_aero_instability",
     "weather_amplified_failure",
     "no_escape_zone_failure",

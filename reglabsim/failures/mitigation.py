@@ -82,6 +82,62 @@ class MitigationEngine:
                 }
             )
 
+        if counts.get("unsafe_defending_exploit", 0) or counts.get("forcing_off_track_exploit", 0):
+            candidates.append(
+                {
+                    "name": "tighten_defending_enforcement",
+                    "description": "Raise defending-space enforcement and remove review lag",
+                    "failure_targets": [
+                        "unsafe_defending_exploit",
+                        "forcing_off_track_exploit",
+                        "grey_area_exploit",
+                    ],
+                    "regulation_overrides": {},
+                    "enforcement_overrides": {
+                        "steward_strictness": "high",
+                        "detection_probability": {
+                            "unsafe_defending": 0.95,
+                            "forcing_off_track": 0.97,
+                        },
+                        "decision_latency_laps": {
+                            "unsafe_defending_penalty": 0,
+                            "forcing_off_track_penalty": 0,
+                        },
+                        "penalties_seconds": {
+                            "unsafe_defending_penalty": 7.5,
+                            "forcing_off_track_penalty": 12.5,
+                        },
+                    },
+                    "expected_tradeoffs": ["fewer squeeze defenses", "more steward intervention"],
+                }
+            )
+            candidates.append(
+                {
+                    "name": "mandate_more_racing_room",
+                    "description": "Codify larger defending-space margin in sporting rules",
+                    "failure_targets": [
+                        "unsafe_defending_exploit",
+                        "forcing_off_track_exploit",
+                    ],
+                    "regulation_overrides": {
+                        "sporting": {
+                            "minimum_racing_room_margin_m": 1.0,
+                            "max_defensive_moves_per_straight": 1,
+                        }
+                    },
+                    "enforcement_overrides": {
+                        "detection_probability": {
+                            "unsafe_defending": 0.92,
+                            "forcing_off_track": 0.95,
+                        }
+                    },
+                    "expected_tradeoffs": [
+                        "cleaner side-by-side exits",
+                        "less ambiguous defending",
+                    ],
+                }
+            )
+
         if counts.get("wind_active_aero_instability", 0):
             candidates.append(
                 {

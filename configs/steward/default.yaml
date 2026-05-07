@@ -2,9 +2,30 @@ steward_strictness: medium
 detection_probability:
   track_limits: 0.98
   unsafe_defending: 0.8
+  forcing_off_track: 0.88
   active_aero_misuse: 0.7
   unsafe_rejoin: 0.85
+  unsafe_closing_speed: 0.82
+  incident: 0.78
 grey_area_bias:
   racing_incident: 0.4
   penalty: 0.35
   warning: 0.25
+decision_latency_laps:
+  track_limits_warning: 0
+  track_limits_penalty: 0
+  warning_for_unsafe_closing_speed: 1
+  unsafe_closing_speed_penalty: 1
+  unsafe_defending_warning: 0
+  unsafe_defending_penalty: 1
+  forcing_off_track_warning: 0
+  forcing_off_track_penalty: 1
+  unsafe_rejoin_warning: 0
+  unsafe_rejoin_penalty: 1
+penalties_seconds:
+  track_limits_penalty: 5.0
+  unsafe_closing_speed_penalty: 10.0
+  unsafe_defending_penalty: 5.0
+  forcing_off_track_penalty: 10.0
+  unsafe_rejoin_penalty: 5.0
+track_limits_penalty_after: 4
