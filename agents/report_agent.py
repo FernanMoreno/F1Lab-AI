@@ -6,9 +6,7 @@ Generates analysis reports from simulation results.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-import yaml
+from typing import Any
 
 
 class ReportAgent:
@@ -21,15 +19,15 @@ class ReportAgent:
         >>> report = agent.generate_experiment_report(results)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         pass
 
     def generate_experiment_report(
         self,
-        experiment_config: Dict[str, Any],
-        results: Dict[str, Any],
-        metrics: Dict[str, float],
+        experiment_config: dict[str, Any],
+        results: dict[str, Any],
+        metrics: dict[str, float],
     ) -> str:
         """Generate experiment report in Markdown.
 
@@ -43,13 +41,13 @@ class ReportAgent:
         """
         report = f"""# Experiment Report
 
-**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+**Generated**: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 
 ## Configuration
 
-- **Name**: {experiment_config.get('experiment_name', 'unnamed')}
-- **Regulation**: {experiment_config.get('regulation', 'unknown')}
-- **Circuits**: {', '.join(experiment_config.get('circuits', []))}
+- **Name**: {experiment_config.get("experiment_name", "unnamed")}
+- **Regulation**: {experiment_config.get("regulation", "unknown")}
+- **Circuits**: {", ".join(experiment_config.get("circuits", []))}
 
 ## Results Summary
 
@@ -98,13 +96,13 @@ class ReportAgent:
             report: Markdown report.
             path: Output path.
         """
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(report)
 
     def generate_comparison_report(
         self,
-        regulation_a_results: Dict[str, Any],
-        regulation_b_results: Dict[str, Any],
+        regulation_a_results: dict[str, Any],
+        regulation_b_results: dict[str, Any],
     ) -> str:
         """Generate comparison report between regulations.
 
@@ -117,7 +115,7 @@ class ReportAgent:
         """
         return f"""# Regulation Comparison Report
 
-**Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+**Generated**: {datetime.now().strftime("%Y-%m-%d %H:%M")}
 
 ## Overview
 
@@ -125,11 +123,11 @@ This report compares two regulations based on simulation results.
 
 ## Regulation A Results
 
-{regulation_a_results.get('summary', 'N/A')}
+{regulation_a_results.get("summary", "N/A")}
 
 ## Regulation B Results
 
-{regulation_b_results.get('summary', 'N/A')}
+{regulation_b_results.get("summary", "N/A")}
 
 ## Comparison
 

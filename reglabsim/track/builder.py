@@ -162,9 +162,9 @@ class GeospatialTrackBuilder:
                 **metadata,
                 "builder": "geospatial_track_builder.v1",
                 "centerline_points": len(centerline),
-                "elevation_source": "openmeteo_elevation"
-                if enrich_elevation
-                else metadata.get("elevation_source"),
+                "elevation_source": (
+                    "openmeteo_elevation" if enrich_elevation else metadata.get("elevation_source")
+                ),
                 "elevation_min_m": min(elevations) if elevations else None,
                 "elevation_max_m": max(elevations) if elevations else None,
                 "length_coverage_ratio": coverage_ratio,
@@ -428,7 +428,11 @@ class GeospatialTrackBuilder:
             return centerline
         if all(point.elevation_m is not None for point in centerline):
             return centerline
-        coordinates = [(float(point.latitude), float(point.longitude)) for point in centerline]
+        coordinates: list[tuple[float, float]] = []
+        for point in centerline:
+            if point.latitude is None or point.longitude is None:
+                return centerline
+            coordinates.append((point.latitude, point.longitude))
         elevations = self._elevation_client().fetch_elevation_profile(coordinates=coordinates)
         return [
             TrackPoint(
@@ -488,9 +492,11 @@ class GeospatialTrackBuilder:
                     width_m=round(width, 2),
                     radius_m=round(radius, 2) if radius is not None else None,
                     elevation_delta_m=round(elevation_delta, 2),
-                    overtaking_viability="high"
-                    if kind == "straight" and segment_length > 450
-                    else ("medium" if kind == "braking_zone" else "low"),
+                    overtaking_viability=(
+                        "high"
+                        if kind == "straight" and segment_length > 450
+                        else ("medium" if kind == "braking_zone" else "low")
+                    ),
                     preferred_battle_zone=kind in {"straight", "braking_zone"}
                     and segment_length > 220,
                     primary_recharge_zone=kind in {"medium_corner", "slow_corner", "braking_zone"},
@@ -658,7 +664,8 @@ class GeospatialTrackBuilder:
             value = row.get(key)
             if value in (None, ""):
                 continue
-            return float(value)
+            if isinstance(value, (int, float, str)):
+                return float(value)
         return None
 
     def _elevation_client(self) -> OpenMeteoClient:
@@ -994,8 +1001,7 @@ class GeospatialTrackBuilder:
         for component in components:
             length_m = sum(way.length_m for way in component)
             centroid_distances = [
-                self._distance_m(center, self._polyline_centroid(way.points))
-                for way in component
+                self._distance_m(center, self._polyline_centroid(way.points)) for way in component
             ]
             mean_center_distance = (
                 sum(centroid_distances) / len(centroid_distances) if centroid_distances else 9999.0
@@ -1415,6 +1421,8 @@ class GeospatialTrackBuilder:
         if candidate in (None, ""):
             return None
         try:
-            return float(candidate)
+            if isinstance(candidate, (int, float, str)):
+                return float(candidate)
+            return None
         except (TypeError, ValueError):
             return None

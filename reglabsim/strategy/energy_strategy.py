@@ -6,7 +6,6 @@ Manages ERS deployment and charging.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass
@@ -30,7 +29,7 @@ class EnergyStrategy:
     Optimizes ERS deployment for best race pace.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize energy strategy."""
         pass
 
@@ -83,7 +82,7 @@ class EnergyStrategy:
         self,
         total_laps: int,
         ers_capacity_mj: float,
-    ) -> Dict[int, str]:
+    ) -> dict[int, str]:
         """Get deployment plan for race.
 
         Args:

@@ -5,9 +5,8 @@ Coordinates multiple agents for complex analysis tasks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -24,9 +23,9 @@ class AgentTask:
 
     task_id: str
     agent_type: str
-    input_data: Dict[str, Any]
+    input_data: dict[str, Any]
     status: str = "pending"
-    result: Optional[Dict[str, Any]] = None
+    result: dict[str, Any] | None = None
 
 
 class AgentGraph:
@@ -41,16 +40,16 @@ class AgentGraph:
         >>> results = graph.execute()
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize graph."""
-        self._tasks: List[AgentTask] = []
-        self._results: Dict[str, Any] = {}
+        self._tasks: list[AgentTask] = []
+        self._results: dict[str, Any] = {}
 
     def add_task(
         self,
         agent_type: str,
-        input_data: Dict[str, Any],
-        task_id: Optional[str] = None,
+        input_data: dict[str, Any],
+        task_id: str | None = None,
     ) -> str:
         """Add a task to the graph.
 
@@ -74,7 +73,7 @@ class AgentGraph:
         self._tasks.append(task)
         return task_id
 
-    def execute(self) -> Dict[str, Any]:
+    def execute(self) -> dict[str, Any]:
         """Execute all tasks in dependency order.
 
         Returns:
@@ -103,22 +102,22 @@ class AgentGraph:
 
         return self._results
 
-    def _execute_regulation_agent(self, input_data: Dict) -> Dict:
+    def _execute_regulation_agent(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute regulation analysis agent."""
         return {"status": "completed", "output": "regulation_analysis"}
 
-    def _execute_experiment_agent(self, input_data: Dict) -> Dict:
+    def _execute_experiment_agent(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute experiment agent."""
         return {"status": "completed", "output": "experiment_results"}
 
-    def _execute_adversarial_agent(self, input_data: Dict) -> Dict:
+    def _execute_adversarial_agent(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute adversarial search agent."""
         return {"status": "completed", "output": "adversarial_findings"}
 
-    def _execute_validation_agent(self, input_data: Dict) -> Dict:
+    def _execute_validation_agent(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute validation agent."""
         return {"status": "completed", "output": "validation_report"}
 
-    def _execute_report_agent(self, input_data: Dict) -> Dict:
+    def _execute_report_agent(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute report generation agent."""
         return {"status": "completed", "output": "report_generated"}

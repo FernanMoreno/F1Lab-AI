@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
-from reglabsim.strategy.base import RuleBasedStrategy, StrategyDecision
+from reglabsim.strategy.base import RuleBasedStrategy
 
 
 class RuleBasedStrategyAgent:
@@ -13,15 +13,15 @@ class RuleBasedStrategyAgent:
     Makes strategy decisions using predefined rules.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         self._strategy = RuleBasedStrategy()
 
     def get_action(
         self,
-        race_state: Dict[str, Any],
-        car_state: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        race_state: dict[str, Any],
+        car_state: dict[str, Any],
+    ) -> dict[str, Any]:
         """Get strategy action.
 
         Args:
@@ -41,9 +41,9 @@ class RuleBasedStrategyAgent:
 
     def evaluate_situation(
         self,
-        race_state: Dict[str, Any],
-        car_state: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        race_state: dict[str, Any],
+        car_state: dict[str, Any],
+    ) -> dict[str, Any]:
         """Evaluate current situation.
 
         Args:

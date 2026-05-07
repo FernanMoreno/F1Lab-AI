@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -18,10 +18,10 @@ class RaceStrategyEnv:
 
     def __init__(
         self,
-        regulation: Dict[str, Any],
+        regulation: dict[str, Any],
         track_id: str,
         total_laps: int = 53,
-    ):
+    ) -> None:
         """Initialize environment.
 
         Args:
@@ -35,13 +35,13 @@ class RaceStrategyEnv:
         self._current_lap = 0
 
         # State
-        self._state: Dict[str, Any] = {}
+        self._state: dict[str, Any] = {}
         self._reset()
 
         # Action and observation spaces would be defined here
         # For now, stub implementation
 
-    def reset(self, seed: Optional[int] = None) -> Tuple[np.ndarray, Dict]:
+    def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset environment.
 
         Args:
@@ -69,8 +69,8 @@ class RaceStrategyEnv:
 
     def step(
         self,
-        action: Tuple[int, int, int],
-    ) -> Tuple[np.ndarray, float, bool, bool, Dict]:
+        action: tuple[int, int, int],
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """Execute action.
 
         Args:
@@ -82,7 +82,7 @@ class RaceStrategyEnv:
         self._current_lap += 1
 
         # Execute action (simplified)
-        pit_action, ers_mode, attack_mode = action
+        _pit_action, _ers_mode, _attack_mode = action
 
         # Update state
         self._state["lap"] = self._current_lap
@@ -102,7 +102,7 @@ class RaceStrategyEnv:
         """Calculate step reward."""
         # Simplified reward: position gain = positive, lap time = negative
         base_reward = 0.0
-        base_reward -= self._state["lap_time_s"] / 100  # Time penalty
+        base_reward -= float(self._state["lap_time_s"]) / 100  # Time penalty
         return base_reward
 
     def _get_obs(self) -> np.ndarray:
@@ -119,16 +119,16 @@ class RaceStrategyEnv:
             dtype=np.float32,
         )
 
-    def _get_info(self) -> Dict:
+    def _get_info(self) -> dict[str, Any]:
         """Get info dict."""
         return {"lap": self._current_lap, "track_id": self._track_id}
 
     @property
-    def action_space(self):
+    def action_space(self) -> None:
         """Action space placeholder."""
         return None  # Would be MultiDiscrete([2, 4, 3])
 
     @property
-    def observation_space(self):
+    def observation_space(self) -> None:
         """Observation space placeholder."""
         return None  # Would be Box(0, 1, shape=(6,))

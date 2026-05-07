@@ -6,7 +6,6 @@ Optimizes pit stop timing and tyre choices.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
 
 
 @dataclass
@@ -30,21 +29,21 @@ class PitStopStrategy:
     Determines optimal pit stop timing and tyre choices.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize pit stop strategy."""
-        self._plan: List[PitStopPlan] = []
+        self._plan: list[PitStopPlan] = []
 
     @property
-    def plan(self) -> List[PitStopPlan]:
+    def plan(self) -> list[PitStopPlan]:
         """Get pit stop plan."""
         return self._plan
 
     def plan_stops(
         self,
         total_laps: int,
-        tyre_options: List[str],
+        tyre_options: list[str],
         track_stress: str = "medium",
-    ) -> List[PitStopPlan]:
+    ) -> list[PitStopPlan]:
         """Create pit stop plan for race.
 
         Args:
@@ -71,7 +70,7 @@ class PitStopStrategy:
             # Three stop strategy
             for i in range(1, 4):
                 lap = total_laps * i // 4
-                stops.append(PitStopPlan(lap, f"C{5-i}", f"Stop {i}"))
+                stops.append(PitStopPlan(lap, f"C{5 - i}", f"Stop {i}"))
 
         self._plan = stops
         return stops

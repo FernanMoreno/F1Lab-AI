@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -21,7 +22,7 @@ class MonteCarloSimulator:
         ... )
     """
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         """Initialize simulator.
 
         Args:
@@ -31,11 +32,11 @@ class MonteCarloSimulator:
 
     def run(
         self,
-        objective_fn: Callable[[Dict[str, Any]], float],
-        param_distributions: Dict[str, tuple],
+        objective_fn: Callable[[dict[str, Any]], float],
+        param_distributions: dict[str, tuple[Any, ...]],
         n_trials: int = 1000,
-        fixed_params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        fixed_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Run Monte Carlo simulation.
 
         Args:
@@ -48,7 +49,7 @@ class MonteCarloSimulator:
             Dict with results.
         """
         fixed_params = fixed_params or {}
-        results = []
+        results: list[float] = []
 
         for _ in range(n_trials):
             # Sample parameters
@@ -76,7 +77,7 @@ class MonteCarloSimulator:
 
         return self._summarize(results)
 
-    def _summarize(self, results: List[float]) -> Dict[str, Any]:
+    def _summarize(self, results: list[float]) -> dict[str, Any]:
         """Summarize simulation results.
 
         Args:

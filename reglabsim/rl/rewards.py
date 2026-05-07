@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
 class RaceRewards:
@@ -89,9 +89,9 @@ class RaceRewards:
 
     @staticmethod
     def composite_reward(
-        race_state: Dict[str, Any],
-        action: tuple,
-        old_state: Dict[str, Any],
+        race_state: dict[str, Any],
+        action: tuple[int, int, int],
+        old_state: dict[str, Any],
     ) -> float:
         """Calculate composite reward.
 

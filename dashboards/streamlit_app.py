@@ -5,8 +5,9 @@ Provides visualization and analysis interface for simulation results.
 
 from __future__ import annotations
 
-import streamlit as st  # type: ignore
 from pathlib import Path
+
+import streamlit as st  # type: ignore
 
 
 def main():
@@ -64,7 +65,8 @@ def show_home():
     st.divider()
     st.subheader("Quick Start")
 
-    st.code("""
+    st.code(
+        """
     from reglabsim import create_facade
 
     facade = create_facade()
@@ -77,7 +79,9 @@ def show_home():
     # Compute metrics
     metrics = facade.compute_metrics(result)
     print(metrics)
-    """, language="python")
+    """,
+        language="python",
+    )
 
     st.divider()
     st.subheader("Latest Experiments")
@@ -130,7 +134,9 @@ def show_regulations():
             config = yaml.safe_load(f)
 
         st.subheader(f"{config.get('name', selected_reg)}")
-        st.caption(f"Version: {config.get('version', 'N/A')} | Status: {config.get('status', 'N/A')}")
+        st.caption(
+            f"Version: {config.get('version', 'N/A')} | Status: {config.get('status', 'N/A')}"
+        )
 
         col1, col2 = st.columns(2)
 
@@ -157,7 +163,9 @@ def show_metrics():
     """)
 
     metric_descriptions = {
-        "battery_dependency_index": "Measures how much race performance depends on electrical energy",
+        "battery_dependency_index": (
+            "Measures how much race performance depends on electrical energy"
+        ),
         "artificial_pass_index": "Measures overtakes caused by energy advantage vs natural pace",
         "dangerous_closing_speed_index": "Measures frequency of unsafe closing speeds",
         "train_formation_index": "Measures frequency of untrainable car formations",

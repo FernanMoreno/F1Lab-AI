@@ -5,7 +5,7 @@ Central registry for all regulation health metrics.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase, MetricResult
 
@@ -22,9 +22,9 @@ class MetricRegistry:
         >>> result = registry.get("battery_dependency_index").calculate(output)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize registry."""
-        self._metrics: Dict[str, MetricBase] = {}
+        self._metrics: dict[str, MetricBase] = {}
 
     def register(self, metric: MetricBase) -> None:
         """Register a metric.
@@ -50,7 +50,7 @@ class MetricRegistry:
             raise KeyError(f"Metric '{name}' not found")
         return self._metrics[name]
 
-    def list_metrics(self) -> List[str]:
+    def list_metrics(self) -> list[str]:
         """List all registered metric names.
 
         Returns:
@@ -60,8 +60,8 @@ class MetricRegistry:
 
     def calculate_all(
         self,
-        simulation_output: Dict[str, Any],
-    ) -> Dict[str, float]:
+        simulation_output: dict[str, Any],
+    ) -> dict[str, float]:
         """Calculate all metrics.
 
         Args:
@@ -72,7 +72,7 @@ class MetricRegistry:
         """
         return {name: m.calculate(simulation_output) for name, m in self._metrics.items()}
 
-    def evaluate_all(self, simulation_output: Dict[str, Any]) -> List[MetricResult]:
+    def evaluate_all(self, simulation_output: dict[str, Any]) -> list[MetricResult]:
         """Calculate and get full results for all metrics.
 
         Args:
@@ -90,20 +90,20 @@ class MetricRegistryImpl(MetricRegistry):
     Pre-registers all standard metrics on initialization.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize with standard metrics."""
         super().__init__()
         self._register_standard_metrics()
 
     def _register_standard_metrics(self) -> None:
         """Register all standard metrics."""
-        from reglabsim.metrics.battery_dependency import BatteryDependencyIndex
         from reglabsim.metrics.artificial_pass import ArtificialPassIndex
+        from reglabsim.metrics.battery_dependency import BatteryDependencyIndex
         from reglabsim.metrics.closing_speed import DangerousClosingSpeedIndex
-        from reglabsim.metrics.train_formation import TrainFormationIndex
         from reglabsim.metrics.dominance import DominantArchitectureRisk
         from reglabsim.metrics.robustness import RegulationRobustnessScore
         from reglabsim.metrics.track_limits_exploit import TrackLimitsExploitIndex
+        from reglabsim.metrics.train_formation import TrainFormationIndex
         from reglabsim.metrics.unsafe_rejoin import UnsafeRejoinRiskIndex
         from reglabsim.metrics.weather_sensitivity import WeatherSensitivityIndex
 

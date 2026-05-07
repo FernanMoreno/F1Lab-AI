@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -56,15 +56,15 @@ class RaceState:
     race_id: str
     lap: int = 0
     total_laps: int = 53
-    cars: List[CarState] = field(default_factory=list)
+    cars: list[CarState] = field(default_factory=list)
     is_finished: bool = False
-    winner: Optional[str] = None
+    winner: str | None = None
 
-    def get_positions(self) -> List[CarState]:
+    def get_positions(self) -> list[CarState]:
         """Get cars sorted by position."""
         return sorted(self.cars, key=lambda c: c.position)
 
-    def get_car(self, car_id: str) -> Optional[CarState]:
+    def get_car(self, car_id: str) -> CarState | None:
         """Get car state by ID."""
         for car in self.cars:
             if car.car_id == car_id:
@@ -85,10 +85,10 @@ class RaceSimulatorBase(ABC):
     @abstractmethod
     def simulate(
         self,
-        race_config: Dict[str, Any],
-        cars: List[Dict[str, Any]],
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        race_config: dict[str, Any],
+        cars: list[dict[str, Any]],
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Simulate a race.
 
         Args:
@@ -108,16 +108,16 @@ class RaceSimulator(RaceSimulatorBase):
     Simulates full race with positions, overtakes, pit stops.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize race simulator."""
         pass
 
     def simulate(
         self,
-        race_config: Dict[str, Any],
-        cars: List[Dict[str, Any]],
-        seed: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        race_config: dict[str, Any],
+        cars: list[dict[str, Any]],
+        seed: int | None = None,
+    ) -> dict[str, Any]:
         """Simulate a race.
 
         Simplified race simulation with position changes.
@@ -127,25 +127,25 @@ class RaceSimulator(RaceSimulatorBase):
         rng = np.random.default_rng(seed)
 
         n_cars = len(cars)
-        n_laps = race_config.get("laps", 53)
+        n_laps = int(race_config.get("laps", 53))
 
         # Initialize car states
-        car_states = []
-        for i, car in enumerate(cars):
+        car_states: list[CarState] = []
+        for i, car_config in enumerate(cars):
             car_states.append(
                 CarState(
-                    car_id=car.get("car_id", f"car_{i}"),
-                    driver_id=car.get("driver_id", f"driver_{i}"),
+                    car_id=str(car_config.get("car_id", f"car_{i}")),
+                    driver_id=str(car_config.get("driver_id", f"driver_{i}")),
                     position=i + 1,
                     lap_time_s=80.0 + rng.uniform(-2, 2),
-                    fuel_mass_kg=car.get("fuel_mass_kg", 100.0),
-                    ers_soc=car.get("ers_soc", 0.8),
+                    fuel_mass_kg=float(car_config.get("fuel_mass_kg", 100.0)),
+                    ers_soc=float(car_config.get("ers_soc", 0.8)),
                 )
             )
 
         # Simulate race laps
-        positions_history = [list(range(1, n_cars + 1))]
-        overtakes = []
+        positions_history: list[list[int]] = [list(range(1, n_cars + 1))]
+        overtakes: list[dict[str, Any]] = []
 
         for lap in range(1, n_laps + 1):
             # Update each car's lap time

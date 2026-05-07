@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 from gymnasium.spaces import Box, Discrete, MultiDiscrete  # type: ignore
 
 
@@ -38,7 +39,7 @@ class RaceObservationSpaces:
 
     # Normalized continuous observations
     @staticmethod
-    def get_observation_shape() -> tuple:
+    def get_observation_shape() -> tuple[int]:
         """Get observation shape.
 
         Returns:
@@ -57,5 +58,5 @@ class RaceObservationSpaces:
             low=0.0,
             high=1.0,
             shape=RaceObservationSpaces.get_observation_shape(),
-            dtype=np.float32,  # type: ignore
+            dtype=np.float32,
         )

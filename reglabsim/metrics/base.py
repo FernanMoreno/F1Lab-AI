@@ -6,8 +6,8 @@ All regulation health metrics inherit from this.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -24,11 +24,7 @@ class MetricResult:
     name: str
     value: float
     status: str
-    details: Dict[str, Any] = None
-
-    def __post_init__(self):
-        if self.details is None:
-            self.details = {}
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 class MetricBase(ABC):
@@ -37,7 +33,7 @@ class MetricBase(ABC):
     Each metric measures a specific aspect of regulation health.
     """
 
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str) -> None:
         """Initialize metric.
 
         Args:
@@ -58,7 +54,7 @@ class MetricBase(ABC):
         return self._description
 
     @abstractmethod
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate metric value.
 
         Args:
@@ -81,7 +77,7 @@ class MetricBase(ABC):
         """
         ...
 
-    def evaluate(self, simulation_output: Dict[str, Any]) -> MetricResult:
+    def evaluate(self, simulation_output: dict[str, Any]) -> MetricResult:
         """Calculate and return full result.
 
         Args:

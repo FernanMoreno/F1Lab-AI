@@ -6,7 +6,6 @@ Models how track conditions evolve during a race weekend.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -53,13 +52,13 @@ class TrackEvolution:
 class SessionEvolution:
     """Track evolution specific to a session type."""
 
-    fp1: TrackEvolution = None
-    fp2: TrackEvolution = None
-    fp3: TrackEvolution = None
-    quali: TrackEvolution = None
-    race: TrackEvolution = None
+    fp1: TrackEvolution | None = None
+    fp2: TrackEvolution | None = None
+    fp3: TrackEvolution | None = None
+    quali: TrackEvolution | None = None
+    race: TrackEvolution | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Initialize default evolution if not provided."""
         if self.fp1 is None:
             self.fp1 = TrackEvolution(initial_grip=0.9, peak_grip=0.98, peak_laps=20)
@@ -86,7 +85,14 @@ class SessionEvolution:
         Returns:
             TrackEvolution for the session.
         """
-        session_map = {
+        assert (
+            self.fp1 is not None
+            and self.fp2 is not None
+            and self.fp3 is not None
+            and self.quali is not None
+            and self.race is not None
+        )
+        session_map: dict[str, TrackEvolution] = {
             "fp1": self.fp1,
             "fp2": self.fp2,
             "fp3": self.fp3,

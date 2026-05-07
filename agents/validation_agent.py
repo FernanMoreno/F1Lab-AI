@@ -5,7 +5,7 @@ Validates simulation against real data and benchmarks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from reglabsim.validation.backtest import Backtester
 from reglabsim.validation.telemetry_validation import TelemetryValidator
@@ -21,7 +21,7 @@ class ValidationAgent:
         >>> report = agent.validate(simulator, test_data)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         self._backtester = Backtester()
         self._telemetry_validator = TelemetryValidator()
@@ -29,8 +29,8 @@ class ValidationAgent:
     def validate_lap_simulation(
         self,
         simulator: Any,
-        test_data: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        test_data: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Validate lap simulation.
 
         Args:
@@ -52,9 +52,9 @@ class ValidationAgent:
 
     def validate_telemetry(
         self,
-        simulated_trace: List[float],
-        real_trace: List[float],
-    ) -> Dict[str, Any]:
+        simulated_trace: list[float],
+        real_trace: list[float],
+    ) -> dict[str, Any]:
         """Validate against real telemetry.
 
         Args:
@@ -72,8 +72,8 @@ class ValidationAgent:
 
     def generate_credibility_report(
         self,
-        validation_results: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        validation_results: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         """Generate overall credibility report.
 
         Args:
@@ -88,7 +88,9 @@ class ValidationAgent:
         if not validation_results:
             score = 0.0
         else:
-            score = sum(r.get("mae_s", 99) or 99 for r in validation_results) / len(validation_results)
+            score = sum(r.get("mae_s", 99) or 99 for r in validation_results) / len(
+                validation_results
+            )
             score = max(0, 100 - score * 10)  # Convert to 0-100 scale
 
         return {

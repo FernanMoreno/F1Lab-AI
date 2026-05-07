@@ -6,7 +6,7 @@ Models pit stop timing and strategy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -38,12 +38,12 @@ class PitStopModel:
     TYPICAL_PIT_STOP_TIME_S = 2.5  # Typical good stop
     MAX_PIT_STOP_TIME_S = 5.0  # Exceptionally slow
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize pit stop model."""
-        self._history: List[PitStopResult] = []
+        self._history: list[PitStopResult] = []
 
     @property
-    def history(self) -> List[PitStopResult]:
+    def history(self) -> list[PitStopResult]:
         """Get pit stop history."""
         return self._history
 
@@ -51,7 +51,7 @@ class PitStopModel:
         self,
         car_id: str,
         lap: int,
-        regulation: Dict,
+        regulation: dict[str, Any],
         tyre_change: bool = True,
         fuel_change_kg: float = 0.0,
     ) -> PitStopResult:

@@ -6,6 +6,7 @@ Models tyre physics including grip, degradation, and temperature.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 @dataclass
@@ -39,7 +40,7 @@ class TyreModel:
     """
 
     # Grip parameters by compound
-    BASE_GRIP = {
+    BASE_GRIP: ClassVar[dict[str, float]] = {
         "C0": 1.05,
         "C1": 1.0,
         "C2": 0.98,

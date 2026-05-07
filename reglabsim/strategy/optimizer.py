@@ -5,7 +5,7 @@ Optimizes strategy using simulation and search.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
 
 
 class StrategyOptimizer:
@@ -14,18 +14,18 @@ class StrategyOptimizer:
     Uses simulation to find optimal strategy parameters.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize optimizer."""
         pass
 
     def optimize_pit_timing(
         self,
-        race_simulator: Callable,
+        race_simulator: Callable[..., float],
         base_lap_time: float,
         tyre_deg_per_lap: float,
         pit_stop_time: float,
         total_laps: int,
-    ) -> List[int]:
+    ) -> list[int]:
         """Optimize pit stop timing.
 
         Args:
@@ -61,7 +61,7 @@ class StrategyOptimizer:
 
     def _calc_race_time(
         self,
-        pit_laps: List[int],
+        pit_laps: list[int],
         base_lap_time: float,
         tyre_deg_per_lap: float,
         pit_stop_time: float,
@@ -100,7 +100,7 @@ class StrategyOptimizer:
         total_laps: int,
         ers_capacity_mj: float,
         lap_energy_use_mj: float,
-    ) -> Dict[int, str]:
+    ) -> dict[int, str]:
         """Optimize ERS deployment strategy.
 
         Args:

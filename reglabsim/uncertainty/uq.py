@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -23,11 +24,11 @@ class UncertaintyQuantifier:
 
     def quantify(
         self,
-        sim_fn: Callable[[Dict[str, Any]], float],
-        input_distributions: Dict[str, tuple],
+        sim_fn: Callable[[dict[str, Any]], float],
+        input_distributions: dict[str, tuple[Any, ...]],
         n_samples: int = 1000,
         confidence_level: float = 0.95,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Quantify output uncertainty.
 
         Args:
@@ -42,7 +43,7 @@ class UncertaintyQuantifier:
         rng = np.random.default_rng(42)
 
         # Generate samples
-        samples = []
+        samples: list[float] = []
         for _ in range(n_samples):
             inputs = {}
             for name, dist_info in input_distributions.items():
@@ -58,17 +59,17 @@ class UncertaintyQuantifier:
 
             samples.append(sim_fn(inputs))
 
-        samples = np.array(samples)
+        sample_array = np.array(samples)
 
         # Calculate statistics
-        mean = float(np.mean(samples))
-        std = float(np.std(samples))
-        median = float(np.median(samples))
+        mean = float(np.mean(sample_array))
+        std = float(np.std(sample_array))
+        median = float(np.median(sample_array))
 
         # Confidence interval
         alpha = 1 - confidence_level
-        ci_lower = np.percentile(samples, alpha / 2 * 100)
-        ci_upper = np.percentile(samples, (1 - alpha / 2) * 100)
+        ci_lower = np.percentile(sample_array, alpha / 2 * 100)
+        ci_upper = np.percentile(sample_array, (1 - alpha / 2) * 100)
 
         return {
             "mean": mean,
@@ -82,10 +83,10 @@ class UncertaintyQuantifier:
 
     def propagate_errors(
         self,
-        nominal_inputs: Dict[str, float],
-        errors: Dict[str, float],
-        sim_fn: Callable[[Dict[str, Any]], float],
-    ) -> tuple:
+        nominal_inputs: dict[str, float],
+        errors: dict[str, float],
+        sim_fn: Callable[[dict[str, Any]], float],
+    ) -> tuple[float, float]:
         """Propagate input errors to output.
 
         Args:
@@ -97,12 +98,8 @@ class UncertaintyQuantifier:
             (lower_bound, upper_bound).
         """
         # Calculate outputs at ±error bounds
-        lower_inputs = {
-            k: v * (1 - errors.get(k, 0)) for k, v in nominal_inputs.items()
-        }
-        upper_inputs = {
-            k: v * (1 + errors.get(k, 0)) for k, v in nominal_inputs.items()
-        }
+        lower_inputs = {k: v * (1 - errors.get(k, 0)) for k, v in nominal_inputs.items()}
+        upper_inputs = {k: v * (1 + errors.get(k, 0)) for k, v in nominal_inputs.items()}
 
         lower = sim_fn(lower_inputs)
         upper = sim_fn(upper_inputs)

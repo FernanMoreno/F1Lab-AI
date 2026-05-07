@@ -125,7 +125,9 @@ class JolpicaClient:
                     "driver_code": driver.get("code"),
                     "driver_number": driver.get("permanentNumber"),
                     "driver_name": f"{driver.get('givenName')} {driver.get('familyName')}",
-                    "constructor_ids": ",".join(item.get("constructorId", "") for item in constructors),
+                    "constructor_ids": ",".join(
+                        item.get("constructorId", "") for item in constructors
+                    ),
                     "constructor_names": ",".join(item.get("name", "") for item in constructors),
                 }
             )
@@ -162,7 +164,10 @@ class JolpicaClient:
         url = f"{self.BASE_URL}/{path}"
         try:
             with urlopen(url, timeout=self._timeout_s) as response:
-                return json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise FetchError(f"Jolpica payload for {url} is not a mapping")
+                return {str(key): value for key, value in payload.items()}
         except Exception as exc:  # pragma: no cover - network failure path
             raise FetchError(f"Jolpica request failed for {url}: {exc}") from exc
 
@@ -173,4 +178,3 @@ class JolpicaClient:
         frame["source"] = "jolpica"
         frame["dataset_name"] = dataset_name
         return frame
-

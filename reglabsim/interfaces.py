@@ -47,7 +47,7 @@ class DataSourceBase(Protocol):
         ...
 
 
-class DataSource(DataSourceBase):
+class DataSource(DataSourceBase, Protocol):
     """Extended protocol for data sources with fetch capabilities."""
 
     def fetch_lap_data(

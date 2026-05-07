@@ -5,7 +5,7 @@ Validates that regulation parameters are within physical limits.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 class RegulationConstraintError(Exception):
@@ -42,7 +42,7 @@ class RegulationConstraints:
     MAX_FUEL_CAPACITY_KG = 200.0
 
     @classmethod
-    def validate(cls, regulation: Any) -> List[str]:
+    def validate(cls, regulation: Any) -> list[str]:
         """Validate regulation and return list of violations.
 
         Args:
@@ -69,7 +69,7 @@ class RegulationConstraints:
         return violations
 
     @classmethod
-    def _validate_power_unit(cls, pu: Dict) -> List[str]:
+    def _validate_power_unit(cls, pu: dict[str, Any]) -> list[str]:
         """Validate power unit parameters."""
         violations = []
 
@@ -97,7 +97,7 @@ class RegulationConstraints:
         return violations
 
     @classmethod
-    def _validate_weights(cls, weights: Dict) -> List[str]:
+    def _validate_weights(cls, weights: dict[str, Any]) -> list[str]:
         """Validate weight parameters."""
         violations = []
 
@@ -111,7 +111,7 @@ class RegulationConstraints:
         return violations
 
     @classmethod
-    def _validate_active_aero(cls, aa: Dict) -> List[str]:
+    def _validate_active_aero(cls, aa: dict[str, Any]) -> list[str]:
         """Validate active aero parameters."""
         violations = []
 
@@ -121,9 +121,7 @@ class RegulationConstraints:
 
         drag_reduction = aa.get("drag_reduction_max_cda_m2", 0)
         if drag_reduction < 0:
-            violations.append(
-                f"drag_reduction_max_cda_m2 cannot be negative: {drag_reduction}"
-            )
+            violations.append(f"drag_reduction_max_cda_m2 cannot be negative: {drag_reduction}")
 
         return violations
 

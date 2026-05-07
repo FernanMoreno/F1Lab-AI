@@ -94,6 +94,8 @@ dev = [
     "mypy>=1.9",
     "ruff>=0.3",
     "black>=24.0",
+    "types-PyYAML>=6.0",
+    "pandas-stubs>=3.0",
     "pre-commit>=3.6",
 ]
 
@@ -130,6 +132,11 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+fast = false
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -164,3 +171,7 @@ warn_no_return = true
 strict_equality = true
 show_error_codes = true
 show_error_context = true
+
+[[tool.mypy.overrides]]
+module = ["fastf1"]
+ignore_missing_imports = true

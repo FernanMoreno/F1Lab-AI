@@ -36,4 +36,3 @@ class UnsafeRejoinRiskIndex(MetricBase):
         if value < 0.35:
             return "critical"
         return "failure"
-

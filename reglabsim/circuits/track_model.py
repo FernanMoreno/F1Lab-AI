@@ -6,7 +6,6 @@ Provides detailed track modeling for simulation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 from reglabsim.circuits.base import CircuitModel
 
@@ -24,7 +23,7 @@ class TrackModel:
     """
 
     circuit: CircuitModel
-    segments: List[TrackSegment] = field(default_factory=list)
+    segments: list[TrackSegment] = field(default_factory=list)
 
     def get_segment_at_distance(self, distance_m: float) -> TrackSegment:
         """Get segment at given distance.
@@ -36,7 +35,7 @@ class TrackModel:
             TrackSegment at that distance.
         """
         for seg in self.segments:
-            if seg.start_m <= distance_m < seg.end_m:
+            if seg.start_distance_m <= distance_m < seg.end_distance_m:
                 return seg
         # Wrap around for end of track
         if distance_m >= self.circuit.length_m:

@@ -9,7 +9,6 @@ import pandas as pd
 
 from reglabsim.data.base import FetchError
 
-
 FASTF1_SESSION_MAP = {
     "race": "R",
     "quali": "Q",
@@ -65,7 +64,7 @@ class FastF1Client:
     def fetch_lap_data(self, circuit_id: str, session_type: str, year: int) -> pd.DataFrame:
         """Fetch lap-level timing data via FastF1."""
         session = self._load_session(year, circuit_id, session_type)
-        frame = session.laps.copy()
+        frame = pd.DataFrame(session.laps.copy())
         if frame.empty:
             return frame
         frame.columns = [self._snake_case(str(column)) for column in frame.columns]
@@ -108,7 +107,7 @@ class FastF1Client:
         """Fetch session weather samples via FastF1."""
         year, circuit_id, session_type = self._parse_session_id(session_id)
         session = self._load_session(year, circuit_id, session_type)
-        frame = session.weather_data.copy()
+        frame = pd.DataFrame(session.weather_data.copy())
         if frame.empty:
             return frame
         frame.columns = [self._snake_case(str(column)) for column in frame.columns]
@@ -150,10 +149,9 @@ class FastF1Client:
         return fastf1
 
     def _snake_case(self, value: str) -> str:
-        chars = []
+        chars: list[str] = []
         for char in value:
             if char.isupper() and chars:
                 chars.append("_")
             chars.append(char.lower() if char.isalnum() else "_")
         return "".join(chars).replace("__", "_").strip("_")
-

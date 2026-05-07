@@ -6,7 +6,6 @@ Models track surface state, rubber buildup, and evolution.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
 
 
 @dataclass
@@ -61,7 +60,7 @@ class TrackState:
 class TrackStateHistory:
     """Tracks track state evolution across sessions."""
 
-    states: List[TrackState] = field(default_factory=list)
+    states: list[TrackState] = field(default_factory=list)
 
     def add_state(self, state: TrackState) -> None:
         """Add a state to history."""

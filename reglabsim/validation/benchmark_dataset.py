@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -23,9 +22,9 @@ class BenchmarkRace:
     race_id: str
     year: int
     circuit: str
-    conditions: Dict[str, Any]
-    results: List[Dict[str, Any]]
-    telemetry: Optional[Dict[str, Any]] = None
+    conditions: dict[str, Any]
+    results: list[dict[str, Any]]
+    telemetry: dict[str, Any] | None = None
 
 
 class BenchmarkDataset:
@@ -38,9 +37,9 @@ class BenchmarkDataset:
         >>> races = dataset.get_races(circuit="monza", year=2023)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize dataset."""
-        self._races: Dict[str, BenchmarkRace] = {}
+        self._races: dict[str, BenchmarkRace] = {}
         self._load_builtin_races()
 
     def _load_builtin_races(self) -> None:
@@ -66,7 +65,7 @@ class BenchmarkDataset:
         """
         self._races[race.race_id] = race
 
-    def get_race(self, race_id: str) -> Optional[BenchmarkRace]:
+    def get_race(self, race_id: str) -> BenchmarkRace | None:
         """Get race by ID.
 
         Args:
@@ -79,9 +78,9 @@ class BenchmarkDataset:
 
     def get_races(
         self,
-        circuit: Optional[str] = None,
-        year: Optional[int] = None,
-    ) -> List[BenchmarkRace]:
+        circuit: str | None = None,
+        year: int | None = None,
+    ) -> list[BenchmarkRace]:
         """Get races matching criteria.
 
         Args:
@@ -100,10 +99,10 @@ class BenchmarkDataset:
 
         return results
 
-    def list_circuits(self) -> List[str]:
+    def list_circuits(self) -> list[str]:
         """List available circuits in dataset."""
-        return list(set(r.circuit for r in self._races.values()))
+        return list({r.circuit for r in self._races.values()})
 
-    def list_years(self) -> List[int]:
+    def list_years(self) -> list[int]:
         """List available years in dataset."""
-        return list(set(r.year for r in self._races.values()))
+        return list({r.year for r in self._races.values()})

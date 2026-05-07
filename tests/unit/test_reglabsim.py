@@ -1,18 +1,8 @@
 """Unit tests for reglabsim package."""
 
-import pytest
-
 
 def test_imports():
     """Test that all main modules can be imported."""
-    from reglabsim import create_facade
-    from reglabsim.interfaces import SimulationFacade
-    from reglabsim.regulation.base import Regulation
-    from reglabsim.circuits.base import CircuitModel
-    from reglabsim.vehicle.car_family import CarFamily
-    from reglabsim.conditions.weather import WeatherCondition
-    from reglabsim.metrics.base import MetricBase
-    from reglabsim.metrics.registry import MetricRegistryImpl
 
 
 def test_facade_creation():
@@ -94,8 +84,8 @@ def test_weather_condition():
 
 def test_metric_registry():
     """Test metric registry."""
-    from reglabsim.metrics.registry import MetricRegistryImpl
     from reglabsim.metrics.battery_dependency import BatteryDependencyIndex
+    from reglabsim.metrics.registry import MetricRegistryImpl
 
     registry = MetricRegistryImpl()
     registry.register(BatteryDependencyIndex())

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
 
 
 @dataclass
@@ -22,7 +21,7 @@ class RegulationVersion:
 
     version: str
     date: datetime
-    changes: List[str]
+    changes: list[str]
 
 
 class RegulationVersionHistory:
@@ -45,7 +44,7 @@ class RegulationVersionHistory:
             regulation_id: Regulation identifier.
         """
         self._regulation_id = regulation_id
-        self._versions: List[RegulationVersion] = []
+        self._versions: list[RegulationVersion] = []
 
     @property
     def regulation_id(self) -> str:
@@ -55,8 +54,8 @@ class RegulationVersionHistory:
     def add_version(
         self,
         version: str,
-        date: Optional[datetime] = None,
-        changes: Optional[List[str]] = None,
+        date: datetime | None = None,
+        changes: list[str] | None = None,
     ) -> None:
         """Add a version to history.
 
@@ -76,7 +75,7 @@ class RegulationVersionHistory:
             )
         )
 
-    def get_versions(self) -> List[RegulationVersion]:
+    def get_versions(self) -> list[RegulationVersion]:
         """Get all versions in chronological order.
 
         Returns:
@@ -84,7 +83,7 @@ class RegulationVersionHistory:
         """
         return sorted(self._versions, key=lambda v: v.date)
 
-    def get_versions_since(self, version: str) -> List[RegulationVersion]:
+    def get_versions_since(self, version: str) -> list[RegulationVersion]:
         """Get versions since given version.
 
         Args:
@@ -99,7 +98,7 @@ class RegulationVersionHistory:
                 return versions[i + 1 :]
         return versions
 
-    def get_latest(self) -> Optional[RegulationVersion]:
+    def get_latest(self) -> RegulationVersion | None:
         """Get most recent version.
 
         Returns:

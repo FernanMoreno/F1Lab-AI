@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, ClassVar
 
 from reglabsim.runtime.schema import RaceAction
 
@@ -11,8 +11,8 @@ from reglabsim.runtime.schema import RaceAction
 class ActionValidator:
     """Validate and sanitize race actions before the microkernel."""
 
-    ALLOWED_PACE_MODES = {"conserve", "balanced", "push", "attack"}
-    ALLOWED_ERS_MODES = {"off", "charge", "hybrid", "boost"}
+    ALLOWED_PACE_MODES: ClassVar[set[str]] = {"conserve", "balanced", "push", "attack"}
+    ALLOWED_ERS_MODES: ClassVar[set[str]] = {"off", "charge", "hybrid", "boost"}
 
     def validate(
         self,
@@ -25,11 +25,16 @@ class ActionValidator:
         allowed_aero = set(active_aero.get("modes", ["straight", "corner", "drs"]))
         pace_mode = action.pace_mode if action.pace_mode in self.ALLOWED_PACE_MODES else "balanced"
         ers_mode = action.ers_mode if action.ers_mode in self.ALLOWED_ERS_MODES else "hybrid"
-        aero_mode = action.aero_mode if action.aero_mode in allowed_aero else next(iter(allowed_aero))
+        aero_mode = (
+            action.aero_mode if action.aero_mode in allowed_aero else next(iter(allowed_aero))
+        )
         risk_level = max(0.0, min(1.0, action.risk_level))
         pit_this_lap = action.pit_this_lap and action.lap < total_laps
 
-        if ers_mode == "boost" and regulation.get("power_unit", {}).get("ers_deployment_max_kw", 0) <= 0:
+        if (
+            ers_mode == "boost"
+            and regulation.get("power_unit", {}).get("ers_deployment_max_kw", 0) <= 0
+        ):
             ers_mode = "hybrid"
         if pace_mode == "attack" and risk_level < 0.55:
             pace_mode = "push"

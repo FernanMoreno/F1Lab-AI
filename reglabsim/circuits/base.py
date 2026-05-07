@@ -6,7 +6,7 @@ Represents F1 circuits with physical properties and metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, ClassVar
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class CircuitModel:
     corners: int
     drs_zones: int
     avg_speed_kph: float
-    characteristics: Dict[str, Any] = field(default_factory=dict)
+    characteristics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def lap_count_estimate(self) -> int:
@@ -47,7 +47,7 @@ class CircuitModel:
     @property
     def is_street_circuit(self) -> bool:
         """Check if street circuit."""
-        return self.characteristics.get("street_circuit", False)
+        return bool(self.characteristics.get("street_circuit", False))
 
     def get_segment_count(self) -> int:
         """Get number of track segments (straights + corners)."""
@@ -95,7 +95,7 @@ class CircuitSegment:
 class CircuitRepository:
     """Repository of known circuits."""
 
-    _circuits: Dict[str, CircuitModel] = {
+    _circuits: ClassVar[dict[str, CircuitModel]] = {
         "monza": CircuitModel(
             circuit_id="monza",
             name="Autodromo Nazionale Monza",
@@ -156,7 +156,7 @@ class CircuitRepository:
         return cls._circuits[circuit_id]
 
     @classmethod
-    def list_ids(cls) -> List[str]:
+    def list_ids(cls) -> list[str]:
         """List all available circuit IDs."""
         return list(cls._circuits.keys())
 

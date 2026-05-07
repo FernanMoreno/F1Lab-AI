@@ -353,15 +353,17 @@ class SimulationFacadeImpl:
         if save_profile:
             saved_path = str(self._conditions_repo.save(scenario, profile_id or scenario.name))
         return {
-            "profile": self.load_condition_profile(profile_id or scenario.name)
-            if save_profile
-            else {
-                "name": scenario.name,
-                "weather": vars(scenario.weather),
-                "track": vars(scenario.track),
-                "forecast": vars(scenario.forecast),
-                "metadata": scenario.metadata,
-            },
+            "profile": (
+                self.load_condition_profile(profile_id or scenario.name)
+                if save_profile
+                else {
+                    "name": scenario.name,
+                    "weather": vars(scenario.weather),
+                    "track": vars(scenario.track),
+                    "forecast": vars(scenario.forecast),
+                    "metadata": scenario.metadata,
+                }
+            ),
             "saved_path": saved_path,
             "ingestion": ingestion,
         }
@@ -391,8 +393,8 @@ class SimulationFacadeImpl:
             "country": country,
             "avg_speed_kph": avg_speed_kph,
         }
-        if race_distance_m is not None and laps not in (None, 0):
-            metadata["target_length_m"] = race_distance_m / float(laps)
+        if race_distance_m is not None and laps is not None and laps != 0:
+            metadata["target_length_m"] = race_distance_m / laps
         if latitude is not None:
             metadata["latitude"] = latitude
         if longitude is not None:
@@ -502,8 +504,8 @@ class SimulationFacadeImpl:
             track = self._track_repo.get(track_id)
             if source_kind != "osm":
                 raise ValueError("Track pack generation currently supports source_kind='osm' only")
-            latitude = float(track.metadata.get("latitude"))
-            longitude = float(track.metadata.get("longitude"))
+            latitude = self._require_float(track.metadata.get("latitude"), "track latitude")
+            longitude = self._require_float(track.metadata.get("longitude"), "track longitude")
             try:
                 result = self.build_track_seed(
                     track_id=track_id,
@@ -958,7 +960,16 @@ class SimulationFacadeImpl:
 
     def _load_yaml(self, path: str | Path) -> dict[str, Any]:
         with open(path, encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
+            loaded = yaml.safe_load(handle) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"YAML at {path} must decode to a mapping")
+        return {str(key): value for key, value in loaded.items()}
+
+    @staticmethod
+    def _require_float(value: Any, label: str) -> float:
+        if isinstance(value, (int, float, str)):
+            return float(value)
+        raise ValueError(f"{label} must be numeric, got {value!r}")
 
     def _condition_scenario_from_weather_frame(
         self,

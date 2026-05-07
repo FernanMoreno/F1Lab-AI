@@ -33,8 +33,16 @@ class DriverAgent(Protocol):
         """Produce one tactical intent."""
 
 
+def _to_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        return float(value)
+    return default
+
+
 def _forecast_threat(forecast: dict[str, object]) -> bool:
-    confidence = float(forecast.get("confidence", 0.0))
+    confidence = _to_float(forecast.get("confidence", 0.0), 0.0)
     rain_lap = forecast.get("rain_expected_lap")
     return rain_lap is not None and confidence > 0.55
 
@@ -101,9 +109,15 @@ class EventDrivenTeamAgent(RuleBasedTeamAgent):
                 car_id=order.car_id,
                 pace_target="conserve" if "unsafe" in str(events).lower() else "push",
                 ers_mode="charge" if "unsafe" in str(events).lower() else order.ers_mode,
-                aero_mode="corner" if observation.weather_forecast.get("wind_warning") else order.aero_mode,
+                aero_mode=(
+                    "corner"
+                    if observation.weather_forecast.get("wind_warning")
+                    else order.aero_mode
+                ),
                 pit_this_lap=order.pit_this_lap,
-                risk_cap=min(order.risk_cap, 0.58) if "unsafe" in str(events).lower() else order.risk_cap,
+                risk_cap=(
+                    min(order.risk_cap, 0.58) if "unsafe" in str(events).lower() else order.risk_cap
+                ),
                 reason="Event-driven escalation path",
             )
         return order
@@ -124,8 +138,14 @@ class RuleBasedDriverAgent:
         attack = gap_ahead < 1.2 and wetness < 0.45
         defend = gap_behind < 1.0
         pace_mode = "attack" if attack else "push" if gap_ahead < 2.5 else "balanced"
-        ers_mode = "boost" if attack and observation.ers_soc > 0.45 else "charge" if observation.ers_soc < 0.25 else "hybrid"
-        aero_mode = "corner" if wetness > 0.35 or segment_risk in {"high", "critical"} else "straight"
+        ers_mode = (
+            "boost"
+            if attack and observation.ers_soc > 0.45
+            else "charge" if observation.ers_soc < 0.25 else "hybrid"
+        )
+        aero_mode = (
+            "corner" if wetness > 0.35 or segment_risk in {"high", "critical"} else "straight"
+        )
         risk = 0.72 if attack else 0.58 if defend else 0.46
 
         if observation.tyre_wear > 0.82 or wetness > 0.75:
@@ -172,7 +192,10 @@ class EventDrivenDriverAgent(RuleBasedDriverAgent):
                 risk_appetite=min(intent.risk_appetite, 0.32),
                 note="Event-driven caution override",
             )
-        if observation.local_track.get("overtaking_viability") == "high" and observation.gap_ahead_s < 0.8:
+        if (
+            observation.local_track.get("overtaking_viability") == "high"
+            and observation.gap_ahead_s < 0.8
+        ):
             return DriverIntent(
                 schema_version=intent.schema_version,
                 car_id=intent.car_id,
@@ -208,6 +231,6 @@ class PolicyReplayDriverAgent:
             attack=bool(action.get("attack", False)),
             defend=bool(action.get("defend", False)),
             pit_request=bool(action.get("pit_this_lap", False)),
-            risk_appetite=float(action.get("risk_level", 0.5)),
+            risk_appetite=_to_float(action.get("risk_level", 0.5), 0.5),
             note="Replay action",
         )

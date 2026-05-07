@@ -1,11 +1,10 @@
 """Integration tests for F1Lab-AI."""
 
-import pytest
-
 
 def test_experiment_config_loading():
     """Test that experiment configs can be loaded."""
     from pathlib import Path
+
     import yaml
 
     experiments_dir = Path("configs/experiments")
@@ -19,6 +18,7 @@ def test_experiment_config_loading():
 def test_regulation_config_loading():
     """Test that regulation configs can be loaded."""
     from pathlib import Path
+
     import yaml
 
     reg_dir = Path("configs/regulations")
@@ -33,6 +33,7 @@ def test_regulation_config_loading():
 def test_car_families_loading():
     """Test that car families config can be loaded."""
     from pathlib import Path
+
     import yaml
 
     families_file = Path("configs/car_families.yaml")

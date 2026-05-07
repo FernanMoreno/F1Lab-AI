@@ -346,9 +346,11 @@ class RaceMicrokernel:
                     self._regulation.get("power_unit", {}).get("ers_max_energy_mj", 6.0)
                 )
                 risk = self._risk_model.evaluate(
-                    segment=high_risk_segment
-                    if closing_speed_kph > segment.risk.unsafe_closing_speed_threshold_kph
-                    else segment,
+                    segment=(
+                        high_risk_segment
+                        if closing_speed_kph > segment.risk.unsafe_closing_speed_threshold_kph
+                        else segment
+                    ),
                     closing_speed_kph=closing_speed_kph,
                     energy_delta_mj=energy_delta_mj,
                     wetness_level=track_state.wetness_level,
@@ -357,7 +359,7 @@ class RaceMicrokernel:
                     side_by_side=True,
                 )
                 event_type = "overtake"
-                details: dict[str, Any] = {
+                battle_details: dict[str, Any] = {
                     "attacker_id": attacker.car_id,
                     "defender_id": defender.car_id,
                     "closing_speed_kph": closing_speed_kph,
@@ -368,19 +370,19 @@ class RaceMicrokernel:
                 adjusted_risk = min(
                     1.0, risk.accident_risk * self._battle_calibration["incident_risk_scale"]
                 )
-                details["accident_risk_adjusted"] = adjusted_risk
+                battle_details["accident_risk_adjusted"] = adjusted_risk
                 if adjusted_risk > 0.88:
                     event_type = "incident"
                     if self._rng.random() < min(0.95, adjusted_risk):
                         defender.damage = min(1.0, defender.damage + 0.22)
                         attacker.damage = min(1.0, attacker.damage + 0.14)
-                        details["impact_severity"] = risk.impact_severity_estimate
+                        battle_details["impact_severity"] = risk.impact_severity_estimate
                         if (
                             risk.impact_severity_estimate == "critical"
                             and self._rng.random() < 0.35
                         ):
                             defender.retired = True
-                            details["retired_car"] = defender.car_id
+                            battle_details["retired_car"] = defender.car_id
                 events.append(
                     RaceEvent(
                         event_type=event_type,
@@ -389,7 +391,7 @@ class RaceMicrokernel:
                         segment_id=(
                             high_risk_segment if event_type == "incident" else segment
                         ).segment_id,
-                        details=details,
+                        details=battle_details,
                     )
                 )
 

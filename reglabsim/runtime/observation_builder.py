@@ -46,7 +46,9 @@ class ObservationBuilder:
                 "segment_name": segment.name,
                 "overtaking_viability": segment.overtaking_viability,
                 "energy_delta_sensitivity": segment.risk.energy_delta_sensitivity,
-                "track_limit_risk": bool(segment.track_limits and segment.track_limits.time_gain_sensitive),
+                "track_limit_risk": bool(
+                    segment.track_limits and segment.track_limits.time_gain_sensitive
+                ),
                 "barrier_distance_m": segment.risk.barrier_distance_m,
                 "evasive_action_margin": segment.risk.evasive_action_margin,
             },

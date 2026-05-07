@@ -28,7 +28,10 @@ class WeatherSensitivityIndex(MetricBase):
         rain_term = (max(rain) - min(rain)) / 4.0 if rain else 0.0
         wetness_term = max(wetness) if wetness else 0.0
         cooling_term = max(cooling) * 2.5 if cooling else 0.0
-        return min(1.0, max(0.0, wind_term * 0.25 + rain_term * 0.2 + wetness_term * 0.35 + cooling_term * 0.2))
+        return min(
+            1.0,
+            max(0.0, wind_term * 0.25 + rain_term * 0.2 + wetness_term * 0.35 + cooling_term * 0.2),
+        )
 
     def get_threshold_status(self, value: float) -> str:
         if value < 0.15:
@@ -38,4 +41,3 @@ class WeatherSensitivityIndex(MetricBase):
         if value < 0.45:
             return "critical"
         return "failure"
-

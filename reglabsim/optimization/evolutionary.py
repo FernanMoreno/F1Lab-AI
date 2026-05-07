@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
+
+import numpy as np
 
 
 class EvolutionaryOptimizer:
@@ -11,19 +14,19 @@ class EvolutionaryOptimizer:
     Genetic algorithm with mutation and crossover.
     """
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         """Initialize optimizer."""
         self._seed = seed
 
     def optimize(
         self,
-        objective_fn: Callable[[Dict[str, Any]], float],
-        search_space: Dict[str, tuple],
+        objective_fn: Callable[[dict[str, Any]], float],
+        search_space: dict[str, tuple[float, float]],
         n_generations: int = 100,
         population_size: int = 50,
         mutation_rate: float = 0.1,
         crossover_rate: float = 0.7,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run evolutionary optimization.
 
         Args:
@@ -37,17 +40,15 @@ class EvolutionaryOptimizer:
         Returns:
             Optimization result.
         """
-        import numpy as np
-
         rng = np.random.default_rng(self._seed)
 
         # Initialize population
         population = self._init_population(search_space, population_size, rng)
 
         best_value = float("inf")
-        best_individual = None
+        best_individual: dict[str, float] | None = None
 
-        for gen in range(n_generations):
+        for _generation in range(n_generations):
             # Evaluate fitness
             fitness = [objective_fn(ind) for ind in population]
 
@@ -59,17 +60,19 @@ class EvolutionaryOptimizer:
 
             # Selection - keep best half
             sorted_indices = np.argsort(fitness)
-            survivors = [population[i] for i in sorted_indices[:population_size // 2]]
+            survivors = [population[i] for i in sorted_indices[: population_size // 2]]
 
             # Create next generation
             next_gen = survivors.copy()
             while len(next_gen) < population_size:
                 # Crossover
                 if rng.random() < crossover_rate and len(survivors) >= 2:
-                    parent1, parent2 = rng.choice(survivors, 2, replace=False)
+                    idx1, idx2 = rng.choice(len(survivors), 2, replace=False)
+                    parent1 = survivors[int(idx1)]
+                    parent2 = survivors[int(idx2)]
                     child = self._crossover(parent1, parent2, rng)
                 else:
-                    child = rng.choice(survivors).copy()
+                    child = survivors[int(rng.integers(len(survivors)))].copy()
 
                 # Mutation
                 if rng.random() < mutation_rate:
@@ -87,26 +90,25 @@ class EvolutionaryOptimizer:
 
     def _init_population(
         self,
-        search_space: Dict[str, tuple],
+        search_space: dict[str, tuple[float, float]],
         size: int,
-        rng,
-    ) -> List[Dict[str, float]]:
+        rng: np.random.Generator,
+    ) -> list[dict[str, float]]:
         """Initialize random population."""
         population = []
         for _ in range(size):
             individual = {
-                name: rng.uniform(bounds[0], bounds[1])
-                for name, bounds in search_space.items()
+                name: rng.uniform(bounds[0], bounds[1]) for name, bounds in search_space.items()
             }
             population.append(individual)
         return population
 
     def _crossover(
         self,
-        parent1: Dict[str, float],
-        parent2: Dict[str, float],
-        rng,
-    ) -> Dict[str, float]:
+        parent1: dict[str, float],
+        parent2: dict[str, float],
+        rng: np.random.Generator,
+    ) -> dict[str, float]:
         """Crossover two parents."""
         child = {}
         for key in parent1:
@@ -115,10 +117,10 @@ class EvolutionaryOptimizer:
 
     def _mutate(
         self,
-        individual: Dict[str, float],
-        search_space: Dict[str, tuple],
-        rng,
-    ) -> Dict[str, float]:
+        individual: dict[str, float],
+        search_space: dict[str, tuple[float, float]],
+        rng: np.random.Generator,
+    ) -> dict[str, float]:
         """Mutate individual."""
         mutated = individual.copy()
         for key in mutated:

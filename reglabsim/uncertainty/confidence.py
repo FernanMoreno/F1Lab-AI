@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
-
 import numpy as np
 
 
@@ -15,10 +13,10 @@ class ConfidenceIntervalCalculator:
 
     @staticmethod
     def bootstrap_ci(
-        data: List[float],
+        data: list[float],
         n_bootstrap: int = 1000,
         confidence_level: float = 0.95,
-    ) -> tuple:
+    ) -> tuple[float, float]:
         """Calculate bootstrap confidence interval.
 
         Args:
@@ -30,16 +28,17 @@ class ConfidenceIntervalCalculator:
             (lower, upper) bounds.
         """
         rng = np.random.default_rng(42)
-        data = np.array(data)
+        data_array = np.array(data)
 
-        bootstrap_means = []
+        bootstrap_means: list[float] = []
         for _ in range(n_bootstrap):
-            sample = rng.choice(data, size=len(data), replace=True)
+            sample = rng.choice(data_array, size=len(data_array), replace=True)
             bootstrap_means.append(np.mean(sample))
 
         alpha = 1 - confidence_level
-        lower = np.percentile(bootstrap_means, alpha / 2 * 100)
-        upper = np.percentile(bootstrap_means, (1 - alpha / 2) * 100)
+        mean_array = np.array(bootstrap_means)
+        lower = np.percentile(mean_array, alpha / 2 * 100)
+        upper = np.percentile(mean_array, (1 - alpha / 2) * 100)
 
         return float(lower), float(upper)
 
@@ -49,7 +48,7 @@ class ConfidenceIntervalCalculator:
         std: float,
         n: int,
         confidence_level: float = 0.95,
-    ) -> tuple:
+    ) -> tuple[float, float]:
         """Calculate parametric confidence interval.
 
         Uses t-distribution for small samples.

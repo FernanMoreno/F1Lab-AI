@@ -8,8 +8,8 @@ from reglabsim.data.base import (
 )
 from reglabsim.data.fastf1_client import FastF1Client
 from reglabsim.data.jolpica_client import JolpicaClient
-from reglabsim.data.openmeteo_client import OpenMeteoClient
 from reglabsim.data.openf1_client import OpenF1Client
+from reglabsim.data.openmeteo_client import OpenMeteoClient
 from reglabsim.data.storage import LocalDataLake
 from reglabsim.data.unified_source import UnifiedDataSource
 

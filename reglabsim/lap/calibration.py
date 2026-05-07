@@ -6,7 +6,6 @@ Tools for calibrating lap simulators to real data.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -22,9 +21,9 @@ class CalibrationResult:
         converged: Whether calibration converged.
     """
 
-    params: Dict[str, float]
+    params: dict[str, float]
     error: float
-    residuals: List[float]
+    residuals: list[float]
     converged: bool
 
 
@@ -45,9 +44,9 @@ class LapCalibrator:
 
     def calibrate(
         self,
-        simulated_times: List[float],
-        real_times: List[float],
-        initial_params: Dict[str, float],
+        simulated_times: list[float],
+        real_times: list[float],
+        initial_params: dict[str, float],
         tolerance: float = 0.01,
         max_iterations: int = 100,
     ) -> CalibrationResult:
@@ -66,10 +65,10 @@ class LapCalibrator:
         params = initial_params.copy()
         residuals = []
 
-        for iteration in range(max_iterations):
+        for _iteration in range(max_iterations):
             # Calculate current residuals
             current_residuals = [
-                sim - real for sim, real in zip(simulated_times, real_times)
+                sim - real for sim, real in zip(simulated_times, real_times, strict=False)
             ]
             residuals.append(sum(r**2 for r in current_residuals) ** 0.5)
 
@@ -96,10 +95,10 @@ class LapCalibrator:
 
     def calibrate_speed_profile(
         self,
-        simulated_speeds: List[float],
-        real_speeds: List[float],
-        distances: Optional[List[float]] = None,
-    ) -> Dict[str, float]:
+        simulated_speeds: list[float],
+        real_speeds: list[float],
+        distances: list[float] | None = None,
+    ) -> dict[str, float]:
         """Calibrate speed profile model.
 
         Args:
@@ -114,11 +113,15 @@ class LapCalibrator:
             raise ValueError("Speed arrays must have same length")
 
         # Calculate scale factors
-        ratios = [r / (s + 1e-6) for r, s in zip(real_speeds, simulated_speeds)]
+        ratios = [r / (s + 1e-6) for r, s in zip(real_speeds, simulated_speeds, strict=False)]
         scale_factor = np.median(ratios)
 
         return {
             "speed_scale": float(scale_factor),
-            "avg_error": float(np.mean([abs(r - s) for r, s in zip(real_speeds, simulated_speeds)])),
-            "max_error": float(max(abs(r - s) for r, s in zip(real_speeds, simulated_speeds))),
+            "avg_error": float(
+                np.mean([abs(r - s) for r, s in zip(real_speeds, simulated_speeds, strict=False)])
+            ),
+            "max_error": float(
+                max(abs(r - s) for r, s in zip(real_speeds, simulated_speeds, strict=False))
+            ),
         }

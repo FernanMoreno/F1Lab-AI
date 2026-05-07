@@ -5,7 +5,7 @@ Reconstructs track models from real telemetry or GPS data.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -23,9 +23,9 @@ class TrackReconstructor:
 
     def reconstruct_from_positions(
         self,
-        positions: List[Tuple[float, float]],
-        distances: Optional[List[float]] = None,
-    ) -> List[Dict[str, Any]]:
+        positions: list[tuple[float, float]],
+        distances: list[float] | None = None,
+    ) -> list[dict[str, Any]]:
         """Reconstruct track segments from position data.
 
         Args:
@@ -36,7 +36,7 @@ class TrackReconstructor:
             List of segment dictionaries.
         """
         # Simplified implementation
-        segments = []
+        segments: list[dict[str, Any]] = []
         n_points = len(positions)
 
         if n_points < 2:
@@ -90,8 +90,8 @@ class TrackReconstructor:
 
     def _compute_curvature(
         self,
-        positions: List[Tuple[float, float]],
-    ) -> List[float]:
+        positions: list[tuple[float, float]],
+    ) -> list[float]:
         """Compute curvature at each point.
 
         Args:
@@ -117,14 +117,14 @@ class TrackReconstructor:
 
             # Cross product magnitude
             cross = v1[0] * v2[1] - v1[1] * v2[0]
-            norm = (np.sqrt(v1[0] ** 2 + v1[1] ** 2) * np.sqrt(v2[0] ** 2 + v2[1] ** 2))
+            norm = np.sqrt(v1[0] ** 2 + v1[1] ** 2) * np.sqrt(v2[0] ** 2 + v2[1] ** 2)
 
             if norm > 0:
                 curvatures[i] = abs(cross) / norm
 
         return curvatures
 
-    def _estimate_radius(self, positions: List[Tuple[float, float]]) -> float:
+    def _estimate_radius(self, positions: list[tuple[float, float]]) -> float:
         """Estimate corner radius from positions.
 
         Args:
@@ -140,8 +140,6 @@ class TrackReconstructor:
         cx = sum(p[0] for p in positions) / len(positions)
         cy = sum(p[1] for p in positions) / len(positions)
 
-        distances = [
-            np.sqrt((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in positions
-        ]
+        distances = [np.sqrt((p[0] - cx) ** 2 + (p[1] - cy) ** 2) for p in positions]
 
-        return np.median(distances) if distances else 50.0
+        return float(np.median(distances)) if distances else 50.0

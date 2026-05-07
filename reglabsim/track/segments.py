@@ -137,4 +137,3 @@ class TrackSegment:
     def length_m(self) -> float:
         """Return segment length."""
         return max(0.0, self.end_m - self.start_m)
-

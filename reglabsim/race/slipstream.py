@@ -5,8 +5,6 @@ Models speed gain from following closely behind another car.
 
 from __future__ import annotations
 
-from typing import Dict
-
 
 class SlipstreamModel:
     """Models slipstream effect.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -23,8 +23,8 @@ class LapResult:
     """
 
     lap_time_s: float
-    sector_times: List[float]
-    speed_trace: List[float]
+    sector_times: list[float]
+    speed_trace: list[float]
     energy_used_mj: float
     energy_recovered_mj: float
     fuel_used_kg: float
@@ -36,11 +36,11 @@ class LapSimulatorBase(ABC):
     @abstractmethod
     def simulate(
         self,
-        vehicle_config: Dict[str, Any],
-        regulation: Dict[str, Any],
+        vehicle_config: dict[str, Any],
+        regulation: dict[str, Any],
         track_length_m: float,
-        initial_state: Optional[Dict[str, Any]] = None,
-        seed: Optional[int] = None,
+        initial_state: dict[str, Any] | None = None,
+        seed: int | None = None,
     ) -> LapResult:
         """Simulate a single lap.
 
@@ -63,17 +63,17 @@ class LapSimulator(LapSimulatorBase):
     Uses basic physics to estimate lap time from speed profile.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize lap simulator."""
         self._speed_profile = None
 
     def simulate(
         self,
-        vehicle_config: Dict[str, Any],
-        regulation: Dict[str, Any],
+        vehicle_config: dict[str, Any],
+        regulation: dict[str, Any],
         track_length_m: float,
-        initial_state: Optional[Dict[str, Any]] = None,
-        seed: Optional[int] = None,
+        initial_state: dict[str, Any] | None = None,
+        seed: int | None = None,
     ) -> LapResult:
         """Simulate a single lap.
 
@@ -82,7 +82,6 @@ class LapSimulator(LapSimulatorBase):
         rng = np.random.default_rng(seed)
 
         # Extract vehicle parameters
-        mass_kg = vehicle_config.get("mass_kg", 780.0)
         power_kw = vehicle_config.get("power_kw", 740.0)
 
         # Calculate average speed (very simplified)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -20,7 +20,7 @@ class StrategyDecision:
 
     decision_type: str
     lap: int
-    params: Dict[str, Any]
+    params: dict[str, Any]
     reason: str = ""
 
 
@@ -30,8 +30,8 @@ class StrategyBase(ABC):
     @abstractmethod
     def decide(
         self,
-        race_state: Dict[str, Any],
-        car_state: Dict[str, Any],
+        race_state: dict[str, Any],
+        car_state: dict[str, Any],
     ) -> StrategyDecision:
         """Make strategic decision.
 
@@ -51,19 +51,18 @@ class RuleBasedStrategy(StrategyBase):
     Makes decisions based on predefined rules.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize strategy."""
-        self._decisions: List[StrategyDecision] = []
+        self._decisions: list[StrategyDecision] = []
 
     def decide(
         self,
-        race_state: Dict[str, Any],
-        car_state: Dict[str, Any],
+        race_state: dict[str, Any],
+        car_state: dict[str, Any],
     ) -> StrategyDecision:
         """Make decision based on rules."""
         # Simple rules
         tyre_age = car_state.get("tyre_age_laps", 0)
-        position = car_state.get("position", 1)
         lap = race_state.get("lap", 0)
 
         # Tyre change decision

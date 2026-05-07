@@ -278,30 +278,47 @@ class PublicPrimitiveCalibrator:
         return {
             "avg_lap_time_s": float(representative["lap_duration"].mean()),
             "median_lap_time_s": float(representative["lap_duration"].median()),
-            "median_st_speed_kph": float(representative["st_speed"].dropna().median())
-            if "st_speed" in representative.columns and representative["st_speed"].notna().any()
-            else 0.0,
-            "sector_1_share": float(
-                (representative["duration_sector_1"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
-                .dropna()
-                .mean()
-            )
-            if "duration_sector_1" in representative.columns
-            else 0.0,
-            "sector_2_share": float(
-                (representative["duration_sector_2"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
-                .dropna()
-                .mean()
-            )
-            if "duration_sector_2" in representative.columns
-            else 0.0,
-            "sector_3_share": float(
-                (representative["duration_sector_3"].fillna(0.0) / sector_total.replace(0.0, pd.NA))
-                .dropna()
-                .mean()
-            )
-            if "duration_sector_3" in representative.columns
-            else 0.0,
+            "median_st_speed_kph": (
+                float(representative["st_speed"].dropna().median())
+                if "st_speed" in representative.columns and representative["st_speed"].notna().any()
+                else 0.0
+            ),
+            "sector_1_share": (
+                float(
+                    (
+                        representative["duration_sector_1"].fillna(0.0)
+                        / sector_total.replace(0.0, pd.NA)
+                    )
+                    .dropna()
+                    .mean()
+                )
+                if "duration_sector_1" in representative.columns
+                else 0.0
+            ),
+            "sector_2_share": (
+                float(
+                    (
+                        representative["duration_sector_2"].fillna(0.0)
+                        / sector_total.replace(0.0, pd.NA)
+                    )
+                    .dropna()
+                    .mean()
+                )
+                if "duration_sector_2" in representative.columns
+                else 0.0
+            ),
+            "sector_3_share": (
+                float(
+                    (
+                        representative["duration_sector_3"].fillna(0.0)
+                        / sector_total.replace(0.0, pd.NA)
+                    )
+                    .dropna()
+                    .mean()
+                )
+                if "duration_sector_3" in representative.columns
+                else 0.0
+            ),
             "lap_count": len(representative),
             "weather_inputs": weather_inputs,
         }
@@ -313,15 +330,15 @@ class PublicPrimitiveCalibrator:
             "avg_lap_time_s": float(sim_result["lap_time_s"]),
             "median_lap_time_s": float(sim_result["lap_time_s"]),
             "median_st_speed_kph": float(sim_result["top_speed_mps"] * 3.6),
-            "sector_1_share": float(sector_times[0] / sector_total)
-            if len(sector_times) > 0
-            else 0.0,
-            "sector_2_share": float(sector_times[1] / sector_total)
-            if len(sector_times) > 1
-            else 0.0,
-            "sector_3_share": float(sector_times[2] / sector_total)
-            if len(sector_times) > 2
-            else 0.0,
+            "sector_1_share": (
+                float(sector_times[0] / sector_total) if len(sector_times) > 0 else 0.0
+            ),
+            "sector_2_share": (
+                float(sector_times[1] / sector_total) if len(sector_times) > 1 else 0.0
+            ),
+            "sector_3_share": (
+                float(sector_times[2] / sector_total) if len(sector_times) > 2 else 0.0
+            ),
         }
 
     def _lap_errors(
@@ -755,8 +772,16 @@ class PublicPrimitiveCalibrator:
         frame = intervals.copy()
         if driver_numbers:
             frame = frame[frame["driver_number"].isin(driver_numbers)]
-        valid_interval = pd.to_numeric(frame.get("interval"), errors="coerce")
-        valid_gap = pd.to_numeric(frame.get("gap_to_leader"), errors="coerce")
+        interval_series = (
+            frame["interval"] if "interval" in frame.columns else pd.Series(dtype="float64")
+        )
+        gap_series = (
+            frame["gap_to_leader"]
+            if "gap_to_leader" in frame.columns
+            else pd.Series(dtype="float64")
+        )
+        valid_interval = pd.to_numeric(interval_series, errors="coerce")
+        valid_gap = pd.to_numeric(gap_series, errors="coerce")
         battle_samples = valid_interval[(valid_interval > 0.0) & valid_interval.notna()]
         gap_samples = valid_gap[(valid_gap >= 0.0) & valid_gap.notna()]
         if battle_samples.empty:
@@ -863,9 +888,9 @@ class PublicPrimitiveCalibrator:
         return {
             "tight_spatial_ratio": float((series <= 80.0).mean()),
             "median_min_pair_distance_m": float(series.median()),
-            "closing_speed_proxy_kph": float(pd.Series(closing_rates, dtype=float).quantile(0.9))
-            if closing_rates
-            else 0.0,
+            "closing_speed_proxy_kph": (
+                float(pd.Series(closing_rates, dtype=float).quantile(0.9)) if closing_rates else 0.0
+            ),
         }
 
     def _persist_report(

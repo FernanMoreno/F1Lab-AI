@@ -5,7 +5,8 @@ Designs and configures simulation experiments.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -23,7 +24,7 @@ class ExperimentAgent:
         ... )
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         pass
 
@@ -31,10 +32,10 @@ class ExperimentAgent:
         self,
         objective: str,
         regulation_id: str,
-        circuit_ids: List[str],
-        car_family_ids: List[str],
+        circuit_ids: list[str],
+        car_family_ids: list[str],
         n_repetitions: int = 1000,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Design a new experiment.
 
         Args:
@@ -62,7 +63,7 @@ class ExperimentAgent:
 
         return experiment
 
-    def _get_metrics_for_objective(self, objective: str) -> List[str]:
+    def _get_metrics_for_objective(self, objective: str) -> list[str]:
         """Get relevant metrics for objective.
 
         Args:
@@ -87,7 +88,7 @@ class ExperimentAgent:
         }
         return metric_map.get(objective, metric_map["full"])
 
-    def load_experiment(self, config_path: str) -> Dict[str, Any]:
+    def load_experiment(self, config_path: str) -> dict[str, Any]:
         """Load experiment from YAML.
 
         Args:
@@ -96,15 +97,18 @@ class ExperimentAgent:
         Returns:
             Experiment configuration.
         """
-        with open(config_path) as f:
-            return yaml.safe_load(f)
+        with Path(config_path).open(encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Experiment config must be a mapping: {config_path}")
+        return {str(key): value for key, value in loaded.items()}
 
-    def save_experiment(self, config: Dict[str, Any], path: str) -> None:
+    def save_experiment(self, config: dict[str, Any], path: str) -> None:
         """Save experiment to YAML.
 
         Args:
             config: Experiment configuration.
             path: Output path.
         """
-        with open(path, "w") as f:
+        with Path(path).open("w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False)

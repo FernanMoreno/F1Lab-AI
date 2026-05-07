@@ -37,14 +37,20 @@ class FailureClassifier:
                         enforcement_dependency=enforcement_name,
                         track_dependency=track_id,
                         condition_dependency=condition_name,
-                        sporting_impact="high" if "track_limits" in tag or "battery" in tag else "medium",
-                        safety_impact="critical" if "unsafe" in tag or "no_escape" in tag else "low",
+                        sporting_impact=(
+                            "high" if "track_limits" in tag or "battery" in tag else "medium"
+                        ),
+                        safety_impact=(
+                            "critical" if "unsafe" in tag or "no_escape" in tag else "low"
+                        ),
                         confidence="medium",
                         evidence={"event": event},
                     )
                 )
 
-        warning_counter = Counter(decision["decision_type"] for decision in run_output.get("steward_log", []))
+        warning_counter = Counter(
+            decision["decision_type"] for decision in run_output.get("steward_log", [])
+        )
         if warning_counter.get("track_limits_warning", 0) >= 3:
             failures.append(
                 FailureEvent(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from reglabsim.runtime.schema import DriverIntent, RaceAction, TeamOrder
 
-
 PACE_ORDER = {
     "conserve": 0,
     "balanced": 1,
@@ -33,7 +32,9 @@ class ActionArbitrator:
         if team_order.ers_mode == "charge" or team_order.risk_cap < 0.4:
             ers_mode = "charge"
 
-        aero_mode = driver_intent.aero_mode if team_order.aero_mode == "straight" else team_order.aero_mode
+        aero_mode = (
+            driver_intent.aero_mode if team_order.aero_mode == "straight" else team_order.aero_mode
+        )
         pit_this_lap = team_order.pit_this_lap or driver_intent.pit_request
         risk_level = min(team_order.risk_cap, driver_intent.risk_appetite)
 

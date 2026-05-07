@@ -6,7 +6,6 @@ Models F1 hybrid power unit.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass

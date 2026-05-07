@@ -6,8 +6,7 @@ Models safety car periods and their effects.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -24,8 +23,8 @@ class SafetyCarPeriod:
 
     period_type: str
     start_lap: int
-    end_lap: Optional[int] = None
-    cars_affected: List[str] = field(default_factory=list)
+    end_lap: int | None = None
+    cars_affected: list[str] = field(default_factory=list)
     cause: str = ""
 
 
@@ -39,13 +38,13 @@ class SafetyCarModel:
     VSC_PROBABILITY_PER_LAP = 0.03
     SAFETY_CAR_PROBABILITY = 0.15  # Given that VSC has happened
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize safety car model."""
-        self._periods: List[SafetyCarPeriod] = []
+        self._periods: list[SafetyCarPeriod] = []
         self._is_deployed = False
 
     @property
-    def periods(self) -> List[SafetyCarPeriod]:
+    def periods(self) -> list[SafetyCarPeriod]:
         """Get all safety car periods."""
         return self._periods
 
@@ -58,9 +57,9 @@ class SafetyCarModel:
 
     def check_for_incident(
         self,
-        race_context: Dict,
-        rng=None,
-    ) -> Optional[str]:
+        race_context: dict[str, Any],
+        rng: Any = None,
+    ) -> str | None:
         """Check if an incident should trigger safety car.
 
         Args:
@@ -89,7 +88,7 @@ class SafetyCarModel:
         period_type: str,
         start_lap: int,
         cause: str,
-        cars: List[str],
+        cars: list[str],
     ) -> SafetyCarPeriod:
         """Deploy safety car or VSC.
 

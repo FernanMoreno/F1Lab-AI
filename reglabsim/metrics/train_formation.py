@@ -5,7 +5,7 @@ Measures frequency of cars stuck in untrainable positions.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 from reglabsim.metrics.helpers import positions_history
@@ -17,14 +17,16 @@ class TrainFormationIndex(MetricBase):
     High values indicate processional racing.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="train_formation_index",
-            description="Measures how often cars remain within attacking distance but cannot overtake",
+            description=(
+                "Measures how often cars remain within attacking distance but cannot overtake"
+            ),
         )
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate train formation index.
 
         Args:

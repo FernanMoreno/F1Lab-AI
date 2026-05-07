@@ -1,7 +1,6 @@
 """Fixtures for tests."""
 
 import pytest
-from pathlib import Path
 
 
 @pytest.fixture

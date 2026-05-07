@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -20,7 +20,7 @@ class ScenarioSampler:
         ... )
     """
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         """Initialize sampler.
 
         Args:
@@ -31,9 +31,9 @@ class ScenarioSampler:
 
     def sample(
         self,
-        space: Dict[str, Any],
+        space: dict[str, Any],
         n_scenarios: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Sample scenarios from defined space.
 
         Args:
@@ -69,9 +69,9 @@ class ScenarioSampler:
 
     def sample_latin_hypercube(
         self,
-        space: Dict[str, tuple],
+        space: dict[str, tuple[float, float]],
         n_scenarios: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Sample using Latin Hypercube method.
 
         Ensures even coverage of parameter space.
@@ -101,7 +101,7 @@ class ScenarioSampler:
         )
 
         # Build scenarios
-        scenarios = []
+        scenarios: list[dict[str, Any]] = []
         for i in range(n_scenarios):
             scenario = {param_names[j]: scaled[i, j] for j in range(n_params)}
             scenarios.append(scenario)
@@ -110,9 +110,9 @@ class ScenarioSampler:
 
     def sample_extreme(
         self,
-        space: Dict[str, tuple],
+        space: dict[str, tuple[float, float]],
         n_extreme: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Sample extreme scenarios at boundaries.
 
         Focuses on edge cases and corner scenarios.
@@ -137,7 +137,7 @@ class ScenarioSampler:
         scenarios.append(high_scenario)
 
         # Mixed extremes
-        for i in range(n_extreme - 2):
+        for _i in range(n_extreme - 2):
             scenario = {}
             for j, name in enumerate(param_names):
                 if j % 2 == 0:

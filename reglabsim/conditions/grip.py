@@ -6,7 +6,7 @@ Models tyre grip as function of compound, age, temperature, and conditions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import ClassVar
 
 
 @dataclass
@@ -26,7 +26,7 @@ class TyreGripModel:
     degradation: float = 1.0
 
     # Grip parameters by compound
-    COMPOUND_GRIP = {
+    COMPOUND_GRIP: ClassVar[dict[str, float]] = {
         "C1": 1.0,
         "C2": 0.98,
         "C3": 0.95,
@@ -103,14 +103,14 @@ class TyreStrategy:
     Tracks available tyre sets and their usage.
     """
 
-    def __init__(self, compounds: List[str], sets_per_compound: Dict[str, int]):
+    def __init__(self, compounds: list[str], sets_per_compound: dict[str, int]):
         """Initialize tyre strategy.
 
         Args:
             compounds: Available compounds.
             sets_per_compound: Number of sets per compound.
         """
-        self.available: Dict[str, List[TyreSet]] = {}
+        self.available: dict[str, list[TyreSet]] = {}
 
         for compound, count in sets_per_compound.items():
             self.available[compound] = [
@@ -131,7 +131,7 @@ class TyreStrategy:
         compound_max = {"C0": 80, "C1": 70, "C2": 60, "C3": 50, "C4": 40, "C5": 30}
         return compound_max.get(compound, 50)
 
-    def get_available_set(self, compound: str) -> Optional[TyreSet]:
+    def get_available_set(self, compound: str) -> TyreSet | None:
         """Get an available tyre set of given compound.
 
         Args:

@@ -6,7 +6,7 @@ Models car-to-car interactions and overtaking.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -37,12 +37,12 @@ class TrafficModel:
     and dirty air effects.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize traffic model."""
-        self._events: List[OvertakeEvent] = []
+        self._events: list[OvertakeEvent] = []
 
     @property
-    def events(self) -> List[OvertakeEvent]:
+    def events(self) -> list[OvertakeEvent]:
         """Get recorded events."""
         return self._events
 
@@ -103,9 +103,9 @@ class TrafficModel:
 
     def simulate_overtake_attempt(
         self,
-        attacker_config: Dict,
-        defender_config: Dict,
-        regulation: Dict,
+        attacker_config: dict[str, Any],
+        defender_config: dict[str, Any],
+        regulation: dict[str, Any],
         drs_available: bool = False,
     ) -> OvertakeEvent:
         """Simulate an overtake attempt.
@@ -126,14 +126,10 @@ class TrafficModel:
         closing_speed = self.calculate_closing_speed(attacker_speed, defender_speed)
 
         # Pace difference
-        pace_diff = attacker_config.get("lap_time_s", 80) - defender_config.get(
-            "lap_time_s", 80
-        )
+        pace_diff = attacker_config.get("lap_time_s", 80) - defender_config.get("lap_time_s", 80)
 
         # Energy advantage
-        ers_adv = attacker_config.get("ers_soc", 0.5) - defender_config.get(
-            "ers_soc", 0.5
-        )
+        ers_adv = attacker_config.get("ers_soc", 0.5) - defender_config.get("ers_soc", 0.5)
 
         # Calculate probability
         prob = self.calculate_overtake_probability(

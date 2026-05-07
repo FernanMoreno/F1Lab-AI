@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-
 RACE_OBSERVATION_SCHEMA = "race_observation.v1"
 TEAM_ORDER_SCHEMA = "team_order.v1"
 DRIVER_INTENT_SCHEMA = "driver_intent.v1"

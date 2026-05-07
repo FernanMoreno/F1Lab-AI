@@ -6,7 +6,7 @@ Manages loaded regulations and provides lookup.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -26,14 +26,14 @@ class RegulationRegistry:
         8.0
     """
 
-    def __init__(self, regulation_dir: Optional[Path] = None):
+    def __init__(self, regulation_dir: Path | None = None):
         """Initialize registry.
 
         Args:
             regulation_dir: Directory containing regulation YAML files.
         """
         self._regulation_dir = regulation_dir
-        self._regulations: Dict[str, Regulation] = {}
+        self._regulations: dict[str, Regulation] = {}
 
         if regulation_dir:
             self.load_all()
@@ -65,15 +65,18 @@ class RegulationRegistry:
         Returns:
             Loaded Regulation object.
         """
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        with path.open(encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Regulation YAML must be a mapping: {path}")
+        data = {str(key): value for key, value in loaded.items()}
 
         reg_id = data.get("name", path.stem)
         regulation = self._parse_regulation(data)
         self._regulations[reg_id] = regulation
         return regulation
 
-    def _parse_regulation(self, data: Dict) -> Regulation:
+    def _parse_regulation(self, data: dict[str, Any]) -> Regulation:
         """Parse regulation data into Regulation object.
 
         Args:
@@ -112,7 +115,7 @@ class RegulationRegistry:
             raise KeyError(f"Regulation '{regulation_id}' not found")
         return self._regulations[regulation_id]
 
-    def list_ids(self) -> List[str]:
+    def list_ids(self) -> list[str]:
         """List all registered regulation IDs.
 
         Returns:

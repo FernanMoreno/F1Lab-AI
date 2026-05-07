@@ -5,7 +5,7 @@ Measures frequency of unsafe closing speeds.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 from reglabsim.metrics.helpers import extract_events
@@ -17,7 +17,7 @@ class DangerousClosingSpeedIndex(MetricBase):
     High values indicate unsafe race dynamics.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="dangerous_closing_speed_index",
@@ -25,7 +25,7 @@ class DangerousClosingSpeedIndex(MetricBase):
         )
         self._threshold_kph = 200.0  # km/h
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate dangerous closing speed index.
 
         Args:

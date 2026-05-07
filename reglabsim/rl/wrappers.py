@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
+
+import numpy as np
 
 from reglabsim.rl.env import RaceStrategyEnv
 
@@ -23,8 +25,8 @@ class RewardShapingWrapper:
 
     def step(
         self,
-        action: tuple,
-    ) -> tuple:
+        action: tuple[int, int, int],
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """Execute step with reward shaping.
 
         Args:
@@ -41,9 +43,9 @@ class RewardShapingWrapper:
 
     def _shape_reward(
         self,
-        obs: Any,
+        obs: np.ndarray,
         base_reward: float,
-        info: Dict,
+        info: dict[str, Any],
     ) -> float:
         """Shape the reward.
 
@@ -59,11 +61,11 @@ class RewardShapingWrapper:
 
         # Progress reward
         lap = info.get("lap", 0)
-        shaping += lap / 1000  # Small reward for progressing
+        shaping += float(lap) / 1000  # Small reward for progressing
 
         return base_reward + shaping
 
-    def reset(self, seed=None):
+    def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset environment."""
         return self._env.reset(seed)
 
@@ -74,20 +76,22 @@ class NormalizeObservationWrapper:
     def __init__(self, env: RaceStrategyEnv):
         """Initialize wrapper."""
         self._env = env
-        self._obs_mean = None
-        self._obs_std = None
+        self._obs_mean: np.ndarray | None = None
+        self._obs_std: np.ndarray | None = None
 
-    def reset(self, seed=None):
+    def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         """Reset environment."""
         obs, info = self._env.reset(seed)
         return self._normalize(obs), info
 
-    def step(self, action):
+    def step(
+        self, action: tuple[int, int, int]
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """Execute step with normalization."""
         obs, reward, term, trunc, info = self._env.step(action)
         return self._normalize(obs), reward, term, trunc, info
 
-    def _normalize(self, obs):
+    def _normalize(self, obs: np.ndarray) -> np.ndarray:
         """Normalize observation."""
         # Simple min-max normalization
         return obs  # Would implement proper normalization

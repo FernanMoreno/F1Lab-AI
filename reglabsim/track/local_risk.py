@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from reglabsim.track.segments import TrackSegment
 
-
 RISK_SCALE = {
     "low": 0.2,
     "medium": 0.45,
@@ -48,7 +47,9 @@ class LocalRiskModel:
         side_by_side: bool,
     ) -> LocalRiskAssessment:
         """Evaluate local risk for a potential battle event."""
-        speed_ratio = min(2.0, closing_speed_kph / max(segment.risk.unsafe_closing_speed_threshold_kph, 1.0))
+        speed_ratio = min(
+            2.0, closing_speed_kph / max(segment.risk.unsafe_closing_speed_threshold_kph, 1.0)
+        )
         energy_factor = min(1.0, abs(energy_delta_mj) / 3.0)
         wet_factor = min(1.0, wetness_level)
         visibility_factor = 1.0 if visibility_m >= 800 else min(1.0, (800 - visibility_m) / 800)
@@ -103,4 +104,3 @@ class LocalRiskModel:
             steward_detectability=max(0.25, 1.0 - visibility_factor * 0.4),
             recommended_failure_tags=tags,
         )
-

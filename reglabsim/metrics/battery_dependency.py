@@ -5,7 +5,7 @@ Measures how much performance depends on electrical energy state.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 
@@ -16,14 +16,14 @@ class BatteryDependencyIndex(MetricBase):
     High values indicate racing becomes overly energy-managed.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="battery_dependency_index",
             description="Measures how much lap/race performance depends on electrical energy state",
         )
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate battery dependency index.
 
         Args:

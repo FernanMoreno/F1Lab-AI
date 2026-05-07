@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -19,8 +19,8 @@ class AdversarialResult:
     """
 
     failure_mode: str
-    scenario: Dict[str, Any]
-    metric_values: Dict[str, float]
+    scenario: dict[str, Any]
+    metric_values: dict[str, float]
     confidence: float
     mitigation: str
 
@@ -40,7 +40,7 @@ class AdversarialSearch:
     """
 
     # Known failure modes
-    FAILURE_MODES = {
+    FAILURE_MODES: ClassVar[dict[str, str]] = {
         "battery_dominance": "Excessive ERS influence on race outcome",
         "artificial_overtaking": "Boost-based overtakes not reflecting real pace",
         "dangerous_closing_speeds": "Unsafe closing speeds in braking zones",
@@ -48,18 +48,18 @@ class AdversarialSearch:
         "dominant_architecture": "One car type dominates all others",
     }
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         """Initialize adversarial search."""
         self._seed = seed
 
     def find_weaknesses(
         self,
-        regulation: Dict[str, Any],
-        metrics: List[Dict],
-        thresholds: Dict[str, float],
-        search_space: Dict[str, tuple],
+        regulation: dict[str, Any],
+        metrics: list[object],
+        thresholds: dict[str, float],
+        search_space: dict[str, tuple[float, float]],
         n_trials: int = 1000,
-    ) -> List[AdversarialResult]:
+    ) -> list[AdversarialResult]:
         """Find regulation weaknesses.
 
         Args:
@@ -75,13 +75,12 @@ class AdversarialSearch:
         import numpy as np
 
         rng = np.random.default_rng(self._seed)
-        failures = []
+        failures: list[AdversarialResult] = []
 
         for _ in range(n_trials):
             # Sample random scenario
             scenario = {
-                name: rng.uniform(bounds[0], bounds[1])
-                for name, bounds in search_space.items()
+                name: rng.uniform(bounds[0], bounds[1]) for name, bounds in search_space.items()
             }
 
             # Evaluate metrics (simplified - would run full simulation)

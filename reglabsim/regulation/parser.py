@@ -6,7 +6,7 @@ Parses regulation YAML files into typed objects.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
@@ -25,7 +25,7 @@ class RegulationParser:
     """
 
     @staticmethod
-    def parse_file(path: Path) -> Dict[str, Any]:
+    def parse_file(path: Path) -> dict[str, Any]:
         """Parse regulation YAML file.
 
         Args:
@@ -41,11 +41,14 @@ class RegulationParser:
         if not path.exists():
             raise FileNotFoundError(f"Regulation file not found: {path}")
 
-        with open(path) as f:
-            return yaml.safe_load(f)
+        with path.open(encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Regulation YAML must be a mapping: {path}")
+        return {str(key): value for key, value in loaded.items()}
 
     @staticmethod
-    def parse_string(yaml_str: str) -> Dict[str, Any]:
+    def parse_string(yaml_str: str) -> dict[str, Any]:
         """Parse regulation from YAML string.
 
         Args:
@@ -57,10 +60,13 @@ class RegulationParser:
         Raises:
             yaml.YAMLError: If YAML is invalid.
         """
-        return yaml.safe_load(yaml_str)
+        loaded = yaml.safe_load(yaml_str) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError("Regulation YAML string must be a mapping")
+        return {str(key): value for key, value in loaded.items()}
 
     @staticmethod
-    def validate_schema(data: Dict[str, Any]) -> bool:
+    def validate_schema(data: dict[str, Any]) -> bool:
         """Validate regulation data has required fields.
 
         Args:
@@ -88,12 +94,12 @@ class RegulationParser:
         return True
 
     @staticmethod
-    def to_yaml(data: Dict[str, Any], path: Path) -> None:
+    def to_yaml(data: dict[str, Any], path: Path) -> None:
         """Write regulation to YAML file.
 
         Args:
             data: Regulation dictionary.
             path: Output file path.
         """
-        with open(path, "w") as f:
+        with path.open("w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)

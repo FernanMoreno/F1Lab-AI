@@ -116,7 +116,9 @@ class TrackRepository:
     def _parse_risk(self, data: dict[str, Any] | None) -> SegmentRiskProfile:
         data = data or {}
         return SegmentRiskProfile(
-            unsafe_closing_speed_threshold_kph=float(data.get("unsafe_closing_speed_threshold_kph", 45.0)),
+            unsafe_closing_speed_threshold_kph=float(
+                data.get("unsafe_closing_speed_threshold_kph", 45.0)
+            ),
             side_by_side_risk=data.get("side_by_side_risk", "medium"),
             evasive_action_margin=data.get("evasive_action_margin", "medium"),
             energy_delta_sensitivity=data.get("energy_delta_sensitivity", "medium"),

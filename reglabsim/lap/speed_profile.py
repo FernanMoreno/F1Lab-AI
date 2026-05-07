@@ -5,7 +5,7 @@ Generates target speed profiles for track segments.
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any
 
 import numpy as np
 
@@ -28,10 +28,10 @@ class SpeedProfileGenerator:
     def generate_profile(
         self,
         track_length: float,
-        corners: List[tuple],
-        vehicle_config: dict,
-        regulation_config: Optional[dict] = None,
-    ) -> List[float]:
+        corners: list[tuple[float, float, float]],
+        vehicle_config: dict[str, Any],
+        regulation_config: dict[str, Any] | None = None,
+    ) -> list[float]:
         """Generate speed profile for track.
 
         Args:
@@ -48,7 +48,6 @@ class SpeedProfileGenerator:
 
         # Vehicle params
         power = vehicle_config.get("power_kw", 740)
-        mass = vehicle_config.get("mass_kg", 780)
         cda = vehicle_config.get("cda_straight_m2", 0.9)
 
         speeds = []
@@ -74,10 +73,10 @@ class SpeedProfileGenerator:
 
     def apply_drs_effect(
         self,
-        speeds: List[float],
-        drs_zones: List[tuple],
+        speeds: list[float],
+        drs_zones: list[tuple[float, float]],
         drs_effect_mps: float = 5.0,
-    ) -> List[float]:
+    ) -> list[float]:
         """Apply DRS speed increase in DRS zones.
 
         Args:
@@ -90,7 +89,6 @@ class SpeedProfileGenerator:
         """
         result = speeds.copy()
         n_points = len(speeds)
-        segment_length = 1.0 / n_points  # Normalized
 
         for start, end in drs_zones:
             start_idx = int(start * n_points)

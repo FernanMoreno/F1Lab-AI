@@ -5,7 +5,7 @@ Analyzes F1 regulations and identifies potential issues.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from reglabsim.regulation.base import Regulation
 
@@ -20,11 +20,11 @@ class RegulationAgent:
         >>> analysis = agent.analyze(regulation)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         pass
 
-    def analyze(self, regulation: Regulation) -> Dict[str, Any]:
+    def analyze(self, regulation: Regulation) -> dict[str, Any]:
         """Analyze a regulation.
 
         Args:
@@ -49,18 +49,22 @@ class RegulationAgent:
         issues = []
 
         if regulation.max_ers_energy_mj > 6.0:
-            issues.append({
-                "type": "high_ers",
-                "severity": "warning",
-                "description": "High ERS energy may lead to battery dominance",
-            })
+            issues.append(
+                {
+                    "type": "high_ers",
+                    "severity": "warning",
+                    "description": "High ERS energy may lead to battery dominance",
+                }
+            )
 
         if regulation.has_active_aero and not analysis.get("assumptions"):
-            issues.append({
-                "type": "active_aero_assumption",
-                "severity": "info",
-                "description": "Active aero enabled - assumptions should be documented",
-            })
+            issues.append(
+                {
+                    "type": "active_aero_assumption",
+                    "severity": "info",
+                    "description": "Active aero enabled - assumptions should be documented",
+                }
+            )
 
         analysis["issues"] = issues
 
@@ -70,7 +74,7 @@ class RegulationAgent:
         self,
         reg_a: Regulation,
         reg_b: Regulation,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compare two regulations.
 
         Args:
@@ -92,8 +96,8 @@ class RegulationAgent:
     def suggest_improvements(
         self,
         regulation: Regulation,
-        failure_modes: List[str],
-    ) -> List[str]:
+        failure_modes: list[str],
+    ) -> list[str]:
         """Suggest regulation improvements.
 
         Args:
@@ -107,20 +111,12 @@ class RegulationAgent:
 
         for mode in failure_modes:
             if mode == "battery_dominance":
-                suggestions.append(
-                    "Consider reducing ERS max deployment power or capacity"
-                )
+                suggestions.append("Consider reducing ERS max deployment power or capacity")
             elif mode == "artificial_overtaking":
-                suggestions.append(
-                    "Increase overtake mode activation gap or add cooldown"
-                )
+                suggestions.append("Increase overtake mode activation gap or add cooldown")
             elif mode == "dangerous_closing_speeds":
-                suggestions.append(
-                    "Add closing speed monitoring and limit boost power"
-                )
+                suggestions.append("Add closing speed monitoring and limit boost power")
             elif mode == "train_formation":
-                suggestions.append(
-                    "Consider improving DRS effectiveness or reducing dirty air"
-                )
+                suggestions.append("Consider improving DRS effectiveness or reducing dirty air")
 
         return suggestions

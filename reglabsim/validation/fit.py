@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -19,8 +20,8 @@ class FitResult:
         converged: Whether fitting converged.
     """
 
-    params: Dict[str, float]
-    residuals: List[float]
+    params: dict[str, float]
+    residuals: list[float]
     error: float
     converged: bool
 
@@ -50,10 +51,10 @@ class ParameterFitter:
 
     def fit(
         self,
-        sim_fn: Callable[[Dict[str, Any]], List[float]],
-        real_data: List[float],
-        initial_params: Dict[str, float],
-        bounds: Optional[Dict[str, tuple]] = None,
+        sim_fn: Callable[[dict[str, Any]], list[float]],
+        real_data: list[float],
+        initial_params: dict[str, float],
+        bounds: dict[str, tuple[float, float]] | None = None,
     ) -> FitResult:
         """Fit parameters to real data.
 
@@ -68,7 +69,7 @@ class ParameterFitter:
         """
         import scipy.optimize  # type: ignore
 
-        def objective(params_dict):
+        def objective(params_dict: dict[str, Any]) -> float:
             # Run simulation
             sim_result = sim_fn(params_dict)
             sim_times = sim_result if isinstance(sim_result, list) else [sim_result]
@@ -83,7 +84,7 @@ class ParameterFitter:
                 real_data_aligned = real_data
 
             # Sum of squared errors
-            error = sum((s - r) ** 2 for s, r in zip(sim_times, real_data_aligned))
+            error = sum((s - r) ** 2 for s, r in zip(sim_times, real_data_aligned, strict=False))
             return error
 
         # Convert initial params to ordered array
@@ -92,8 +93,10 @@ class ParameterFitter:
 
         # Define bounds if provided
         if bounds:
-            bounds_arr = [[bounds[k][0] for k in param_names],
-                          [bounds[k][1] for k in param_names]]
+            bounds_arr: tuple[list[float], list[float]] | tuple[float, float] = (
+                [bounds[k][0] for k in param_names],
+                [bounds[k][1] for k in param_names],
+            )
         else:
             bounds_arr = (-np.inf, np.inf)
 
@@ -106,7 +109,7 @@ class ParameterFitter:
         )
 
         # Build result
-        fitted_params = dict(zip(param_names, result.x))
+        fitted_params = dict(zip(param_names, result.x, strict=False))
 
         return FitResult(
             params=fitted_params,

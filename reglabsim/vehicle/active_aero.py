@@ -6,7 +6,6 @@ Models DRS and other active aero systems.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass
@@ -41,9 +40,9 @@ class ActiveAeroModel:
     def __init__(
         self,
         enabled: bool = False,
-        modes: List[str] = None,
+        modes: list[str] | None = None,
         transition_time: float = 0.25,
-    ):
+    ) -> None:
         """Initialize active aero model.
 
         Args:
@@ -55,6 +54,7 @@ class ActiveAeroModel:
         self.modes = modes or ["straight", "corner", "drs"]
         self.transition_time = transition_time
         self._current_mode = "straight"
+        self._transition_to_mode = "straight"
         self._transition_remaining = 0.0
 
         # Drag reduction for each mode
@@ -89,6 +89,8 @@ class ActiveAeroModel:
         if mode == self._current_mode:
             return True
 
+        self._transition_to_mode = mode
+        self._current_mode = "transitioning"
         self._transition_remaining = self.transition_time
         return True
 
@@ -105,7 +107,7 @@ class ActiveAeroModel:
             # Complete transition
             self._current_mode = self._transition_to_mode  # Would need to track this
 
-    def get_drag_reduction(self, mode: str = None) -> float:
+    def get_drag_reduction(self, mode: str | None = None) -> float:
         """Get drag reduction for mode.
 
         Args:

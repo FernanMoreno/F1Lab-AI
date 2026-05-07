@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 
 class BayesianOptimizer:
@@ -19,18 +20,18 @@ class BayesianOptimizer:
         ... )
     """
 
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         """Initialize optimizer."""
         self._seed = seed
-        self._trials: list = []
+        self._trials: list[dict[str, Any]] = []
 
     def optimize(
         self,
-        objective_fn: Callable[[Dict[str, Any]], float],
-        search_space: Dict[str, tuple],
+        objective_fn: Callable[[dict[str, Any]], float],
+        search_space: dict[str, tuple[float, float]],
         n_trials: int = 50,
         exploitation_ratio: float = 0.5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run Bayesian optimization.
 
         Args:
@@ -46,12 +47,12 @@ class BayesianOptimizer:
 
         rng = np.random.default_rng(self._seed)
         best_value = float("inf")
-        best_params = None
+        best_params: dict[str, float] | None = None
 
         # Simple random search with exploitation
-        for i in range(n_trials):
+        for _i in range(n_trials):
             # Sample parameters
-            params = {}
+            params: dict[str, float] = {}
             for name, (low, high) in search_space.items():
                 if rng.random() < exploitation_ratio and self._trials:
                     # Exploit: sample near best

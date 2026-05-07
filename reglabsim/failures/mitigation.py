@@ -36,7 +36,10 @@ class MitigationEngine:
             candidates.append(
                 {
                     "name": "slow_active_aero_transitions",
-                    "description": "Increase active aero transition time and force corner mode in risk zones",
+                    "description": (
+                        "Increase active aero transition time and force "
+                        "corner mode in risk zones"
+                    ),
                     "regulation_overrides": {"active_aero": {"transition_time_s": 0.4}},
                     "enforcement_overrides": {"steward_strictness": "high"},
                 }

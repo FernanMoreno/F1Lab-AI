@@ -5,7 +5,7 @@ Searches for regulation weaknesses and failure modes.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from reglabsim.optimization.adversarial import AdversarialResult
 
@@ -20,7 +20,7 @@ class AdversarialAgent:
         >>> findings = agent.find_weaknesses(regulation)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize agent."""
         pass
 
@@ -28,7 +28,7 @@ class AdversarialAgent:
         self,
         regulation_id: str,
         n_trials: int = 1000,
-    ) -> List[AdversarialResult]:
+    ) -> list[AdversarialResult]:
         """Find regulation weaknesses.
 
         Args:
@@ -65,7 +65,7 @@ class AdversarialAgent:
             n_trials=n_trials,
         )
 
-    def generate_report(self, findings: List[AdversarialResult]) -> Dict[str, Any]:
+    def generate_report(self, findings: list[AdversarialResult]) -> dict[str, Any]:
         """Generate adversarial analysis report.
 
         Args:
@@ -81,7 +81,7 @@ class AdversarialAgent:
             }
 
         # Group by failure mode
-        by_mode: Dict[str, List] = {}
+        by_mode: dict[str, list[AdversarialResult]] = {}
         for finding in findings:
             mode = finding.failure_mode
             if mode not in by_mode:
@@ -93,9 +93,7 @@ class AdversarialAgent:
             "status": "issues_found",
             "total_findings": len(findings),
             "unique_modes": len(by_mode),
-            "by_failure_mode": {
-                mode: len(findings) for mode, findings in by_mode.items()
-            },
+            "by_failure_mode": {mode: len(findings) for mode, findings in by_mode.items()},
             "highest_confidence": max(f.confidence for f in findings),
         }
 

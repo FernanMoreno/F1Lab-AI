@@ -146,4 +146,3 @@ class UnifiedDataSource:
         raise FetchError(
             f"All data sources failed for {method_name}. Attempts: {' | '.join(errors) or 'none'}"
         )
-

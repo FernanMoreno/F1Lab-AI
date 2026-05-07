@@ -5,6 +5,6 @@ __version__ = "0.2.0"
 from reglabsim.facade import create_facade
 
 __all__ = [
-    "create_facade",
     "__version__",
+    "create_facade",
 ]

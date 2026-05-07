@@ -5,8 +5,6 @@ Models aerodynamic impact of following another car.
 
 from __future__ import annotations
 
-from typing import Dict
-
 
 class DirtyAirModel:
     """Models dirty air effects.
@@ -101,7 +99,7 @@ class DirtyAirModel:
         self,
         car_sensitivity: float,
         optimal_distance_m: float = 15.0,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate driving style adjustments for dirty air.
 
         Args:

@@ -6,7 +6,7 @@ Represents F1 regulations with all technical parameters.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -30,41 +30,41 @@ class Regulation:
     name: str
     version: str
     status: str = "unknown"
-    power_unit: Dict[str, Any] = field(default_factory=dict)
-    active_aero: Dict[str, Any] = field(default_factory=dict)
-    aero: Dict[str, Any] = field(default_factory=dict)
-    tyres: Dict[str, Any] = field(default_factory=dict)
-    safety: Dict[str, Any] = field(default_factory=dict)
-    weights: Dict[str, Any] = field(default_factory=dict)
-    sessions: Dict[str, Any] = field(default_factory=dict)
-    assumptions: List[str] = field(default_factory=list)
+    power_unit: dict[str, Any] = field(default_factory=dict)
+    active_aero: dict[str, Any] = field(default_factory=dict)
+    aero: dict[str, Any] = field(default_factory=dict)
+    tyres: dict[str, Any] = field(default_factory=dict)
+    safety: dict[str, Any] = field(default_factory=dict)
+    weights: dict[str, Any] = field(default_factory=dict)
+    sessions: dict[str, Any] = field(default_factory=dict)
+    assumptions: list[str] = field(default_factory=list)
 
     @property
     def has_active_aero(self) -> bool:
         """Check if active aero is enabled."""
-        return self.active_aero.get("enabled", False)
+        return bool(self.active_aero.get("enabled", False))
 
     @property
     def max_ers_energy_mj(self) -> float:
         """Get maximum ERS energy storage in MJ."""
-        return self.power_unit.get("ers_max_energy_mj", 4.0)
+        return float(self.power_unit.get("ers_max_energy_mj", 4.0))
 
     @property
     def max_ers_deployment_kw(self) -> float:
         """Get maximum ERS deployment power in kW."""
-        return self.power_unit.get("ers_deployment_max_kw", 120)
+        return float(self.power_unit.get("ers_deployment_max_kw", 120.0))
 
     @property
     def drs_enabled(self) -> bool:
         """Check if DRS is enabled."""
-        return self.aero.get("drs_zones", 0) > 0
+        return self.drs_zones > 0
 
     @property
     def drs_zones(self) -> int:
         """Get number of DRS zones."""
-        return self.aero.get("drs_zones", 0)
+        return int(self.aero.get("drs_zones", 0))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation.
 
         Returns:
@@ -84,7 +84,7 @@ class Regulation:
             "assumptions": self.assumptions,
         }
 
-    def diff(self, other: Regulation) -> Dict[str, Any]:
+    def diff(self, other: Regulation) -> dict[str, Any]:
         """Compare with another regulation and return differences.
 
         Args:
@@ -93,7 +93,7 @@ class Regulation:
         Returns:
             Dict with keys for each differing parameter.
         """
-        differences = {}
+        differences: dict[str, Any] = {}
 
         if self.power_unit != other.power_unit:
             differences["power_unit"] = {

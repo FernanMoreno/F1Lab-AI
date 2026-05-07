@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 
@@ -19,10 +19,10 @@ class BacktestResult:
         metrics: Error metrics (MAE, RMSE, etc).
     """
 
-    predictions: List[float]
-    actuals: List[float]
-    errors: List[float]
-    metrics: Dict[str, float]
+    predictions: list[float]
+    actuals: list[float]
+    errors: list[float]
+    metrics: dict[str, float]
 
 
 class Backtester:
@@ -41,7 +41,7 @@ class Backtester:
     def backtest(
         self,
         simulator: Any,
-        test_data: List[Dict[str, Any]],
+        test_data: list[dict[str, Any]],
         metric: str = "lap_time",
     ) -> BacktestResult:
         """Run backtest.
@@ -69,7 +69,7 @@ class Backtester:
             actuals.append(actual)
 
         # Calculate errors
-        errors = [p - a for p, a in zip(predictions, actuals)]
+        errors = [p - a for p, a in zip(predictions, actuals, strict=False)]
 
         # Calculate metrics
         mae = np.mean(np.abs(errors))
@@ -90,9 +90,9 @@ class Backtester:
     def cross_validate(
         self,
         simulator: Any,
-        data: List[Dict[str, Any]],
+        data: list[dict[str, Any]],
         n_folds: int = 5,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Run cross-validation.
 
         Args:
@@ -109,8 +109,7 @@ class Backtester:
 
         all_errors = []
 
-        for train_idx, test_idx in kf.split(data):
-            train_data = [data[i] for i in train_idx]
+        for _train_idx, test_idx in kf.split(data):
             test_data = [data[i] for i in test_idx]
 
             # Train (fit parameters) on train_data

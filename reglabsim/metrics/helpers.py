@@ -23,7 +23,9 @@ def extract_event_log(simulation_output: dict[str, Any]) -> list[dict[str, Any]]
 def extract_events(simulation_output: dict[str, Any], *event_types: str) -> list[dict[str, Any]]:
     """Return events filtered by event type."""
     target = set(event_types)
-    return [event for event in extract_event_log(simulation_output) if event.get("event_type") in target]
+    return [
+        event for event in extract_event_log(simulation_output) if event.get("event_type") in target
+    ]
 
 
 def positions_history(simulation_output: dict[str, Any]) -> list[list[str]]:
@@ -47,4 +49,3 @@ def weather_series(simulation_output: dict[str, Any], field_name: str) -> list[f
         elif field_name in snapshot.get("track_state", {}):
             values.append(float(snapshot["track_state"][field_name]))
     return values
-

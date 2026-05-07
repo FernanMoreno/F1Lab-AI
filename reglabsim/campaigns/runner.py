@@ -84,7 +84,7 @@ class CampaignRunner:
             prompt_template_version=spec.prompt_template_version,
         )
 
-        cars = self._build_grid(spec)
+        cars: list[CarRuntimeState] = self._build_grid(spec)
         builder = ObservationBuilder()
         arbitrator = ActionArbitrator()
         validator = ActionValidator()
@@ -96,6 +96,8 @@ class CampaignRunner:
         )
 
         team_agents, driver_agents = self._build_agents(spec, replay_actions)
+        if spec.conditions is None:
+            raise ValueError("CampaignSpec.conditions must be resolved before run_race")
         weather = spec.conditions.weather
         track_state = spec.conditions.track
         forecast = spec.conditions.forecast
@@ -131,7 +133,7 @@ class CampaignRunner:
             )
 
             team_orders: dict[str, Any] = {}
-            actions = {}
+            actions: dict[str, Any] = {}
             for team_id in sorted({car.team_id for car in cars if not car.retired}):
                 team_cars = [
                     car.to_dict() for car in cars if car.team_id == team_id and not car.retired
@@ -152,9 +154,9 @@ class CampaignRunner:
                 prompt_trace_metadata.append(
                     {"lap": lap, "team_id": team_id, "mode": team_agents[team_id].mode}
                 )
-                for car in team_cars:
-                    team_order = team_agents[team_id].decide(team_obs, car["car_id"])
-                    team_orders[car["car_id"]] = team_order
+                for team_car in team_cars:
+                    team_order = team_agents[team_id].decide(team_obs, team_car["car_id"])
+                    team_orders[team_car["car_id"]] = team_order
 
             for car in cars:
                 if car.retired:

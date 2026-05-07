@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict
 
 
 @dataclass
@@ -109,7 +108,7 @@ class VehicleModel(ABC):
         power_n = power_kw * 1000 / max(state.speed_mps, 0.1)
 
         drag = self.get_drag_force(state.speed_mps)
-        downforce = self.get_downforce(state.speed_mps)
+        self.get_downforce(state.speed_mps)
 
         # Simplified rolling resistance
         rolling_res = 0.015 * self.mass_kg * 9.81

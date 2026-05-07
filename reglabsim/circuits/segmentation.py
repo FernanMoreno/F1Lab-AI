@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List
 
 
 class SegmentType(Enum):
@@ -49,9 +48,9 @@ class TrackSegmenter:
 
     def classify_segments(
         self,
-        distances: List[float],
-        speeds: List[float],
-    ) -> List[SegmentClassification]:
+        distances: list[float],
+        speeds: list[float],
+    ) -> list[SegmentClassification]:
         """Classify track segments from speed profile.
 
         Args:
@@ -61,7 +60,7 @@ class TrackSegmenter:
         Returns:
             List of segment classifications.
         """
-        classifications = []
+        classifications: list[SegmentClassification] = []
         n = len(distances)
 
         if n < 2:
@@ -103,7 +102,7 @@ class TrackSegmenter:
     def _estimate_difficulty(
         self,
         seg_type: SegmentType,
-        speeds: List[float],
+        speeds: list[float],
     ) -> int:
         """Estimate corner difficulty (1-10).
 

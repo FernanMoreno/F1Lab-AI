@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -23,10 +23,10 @@ class TelemetryValidator:
 
     def validate(
         self,
-        simulated_trace: List[float],
-        real_trace: List[float],
+        simulated_trace: list[float],
+        real_trace: list[float],
         tolerance_s: float = 0.5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Validate simulated trace against real.
 
         Args:
@@ -38,12 +38,10 @@ class TelemetryValidator:
             Validation result.
         """
         if len(simulated_trace) != len(real_trace):
-            simulated_trace, real_trace = self._align_traces(
-                simulated_trace, real_trace
-            )
+            simulated_trace, real_trace = self._align_traces(simulated_trace, real_trace)
 
         # Calculate errors
-        errors = [s - r for s, r in zip(simulated_trace, real_trace)]
+        errors = [s - r for s, r in zip(simulated_trace, real_trace, strict=False)]
         abs_errors = [abs(e) for e in errors]
 
         # Validation checks
@@ -60,9 +58,9 @@ class TelemetryValidator:
 
     def _align_traces(
         self,
-        trace1: List[float],
-        trace2: List[float],
-    ) -> tuple:
+        trace1: list[float],
+        trace2: list[float],
+    ) -> tuple[list[float], list[float]]:
         """Align traces of different lengths.
 
         Args:
@@ -78,9 +76,9 @@ class TelemetryValidator:
 
     def validate_speed_profile(
         self,
-        simulated_speeds: List[float],
-        real_speeds: List[float],
-    ) -> Dict[str, Any]:
+        simulated_speeds: list[float],
+        real_speeds: list[float],
+    ) -> dict[str, Any]:
         """Validate speed profile specifically.
 
         Args:
@@ -96,7 +94,7 @@ class TelemetryValidator:
             real_speeds = real_speeds[:min_len]
 
         # Speed-specific metrics
-        speed_errors = [s - r for s, r in zip(simulated_speeds, real_speeds)]
+        speed_errors = [s - r for s, r in zip(simulated_speeds, real_speeds, strict=False)]
 
         # Check for systematic bias
         mean_error = np.mean(speed_errors)

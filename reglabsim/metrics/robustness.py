@@ -5,7 +5,7 @@ Overall measure of regulation health across scenarios.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 
@@ -16,7 +16,7 @@ class RegulationRobustnessScore(MetricBase):
     Combines multiple metrics into overall health score.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="regulation_robustness_score",
@@ -29,7 +29,7 @@ class RegulationRobustnessScore(MetricBase):
             "train_formation_index",
         ]
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate robustness score.
 
         Args:

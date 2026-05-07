@@ -6,8 +6,7 @@ Manages race state transitions and validation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -23,7 +22,7 @@ class RaceEvent:
 
     timestamp: float
     event_type: str
-    car_id: Optional[str]
+    car_id: str | None
     description: str
 
 
@@ -45,14 +44,14 @@ class RaceState:
     current_lap: int = 0
     total_laps: int = 53
     race_time_s: float = 0.0
-    positions: Dict[str, int] = field(default_factory=dict)
-    events: List[RaceEvent] = field(default_factory=list)
+    positions: dict[str, int] = field(default_factory=dict)
+    events: list[RaceEvent] = field(default_factory=list)
     is_active: bool = False
 
     def add_event(
         self,
         event_type: str,
-        car_id: Optional[str],
+        car_id: str | None,
         description: str,
     ) -> None:
         """Add a race event.
@@ -71,13 +70,13 @@ class RaceState:
             )
         )
 
-    def get_leader(self) -> Optional[str]:
+    def get_leader(self) -> str | None:
         """Get leader car ID."""
         if not self.positions:
             return None
-        return min(self.positions, key=self.positions.get)
+        return min(self.positions, key=self.positions.__getitem__)
 
-    def get_position(self, car_id: str) -> Optional[int]:
+    def get_position(self, car_id: str) -> int | None:
         """Get car position."""
         return self.positions.get(car_id)
 
@@ -92,7 +91,7 @@ class RaceStateManager:
     Handles state updates, validation, and event logging.
     """
 
-    def __init__(self, race_id: str, total_laps: int = 53):
+    def __init__(self, race_id: str, total_laps: int = 53) -> None:
         """Initialize state manager.
 
         Args:
@@ -110,7 +109,7 @@ class RaceStateManager:
         """Get current state."""
         return self._state
 
-    def update_positions(self, positions: Dict[str, int]) -> None:
+    def update_positions(self, positions: dict[str, int]) -> None:
         """Update car positions.
 
         Args:
@@ -173,7 +172,7 @@ class RaceStateManager:
             description=f"{car_id} pit stop on lap {lap} ({duration_s:.1f}s)",
         )
 
-    def get_state_summary(self) -> Dict[str, Any]:
+    def get_state_summary(self) -> dict[str, Any]:
         """Get state summary.
 
         Returns:

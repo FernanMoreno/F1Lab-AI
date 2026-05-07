@@ -5,6 +5,8 @@ Provides fast computation for hot loops.
 
 from __future__ import annotations
 
+from typing import Any
+
 # This module would contain numba JIT-compiled functions
 # for performance-critical speed profile calculations.
 
@@ -15,7 +17,12 @@ from __future__ import annotations
 # def calculate_speed_profile(...):
 #     ...
 
-def speed_at_distance_numba(distance_m: float, corners: list, vehicle_params: dict) -> float:
+
+def speed_at_distance_numba(
+    distance_m: float,
+    corners: list[tuple[float, float, float]],
+    vehicle_params: dict[str, Any],
+) -> float:
     """Calculate vehicle speed at given distance.
 
     This is a placeholder - real implementation would use numba.
@@ -32,7 +39,7 @@ def speed_at_distance_numba(distance_m: float, corners: list, vehicle_params: di
     return 80.0
 
 
-def integrate_lap_time_numba(speeds: list, distances: list) -> float:
+def integrate_lap_time_numba(speeds: list[float], distances: list[float]) -> float:
     """Integrate lap time from speed profile.
 
     Args:

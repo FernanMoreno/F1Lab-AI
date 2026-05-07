@@ -5,7 +5,7 @@ Measures if one car family dominates across scenarios.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 
@@ -16,14 +16,14 @@ class DominantArchitectureRisk(MetricBase):
     High values suggest regulation favors one design too strongly.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="dominant_architecture_risk",
             description="Measures whether one synthetic car family dominates across circuits",
         )
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate dominance risk.
 
         Args:
@@ -41,7 +41,7 @@ class DominantArchitectureRisk(MetricBase):
             return 0.0
 
         # Count wins by family
-        family_wins: Dict[str, int] = {}
+        family_wins: dict[str, int] = {}
         total_wins = 0
 
         for car in cars:

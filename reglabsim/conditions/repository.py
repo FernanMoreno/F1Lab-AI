@@ -8,7 +8,12 @@ from typing import Any
 import yaml
 
 from reglabsim.conditions.forecast import default_forecast
-from reglabsim.conditions.scenarios import ConditionsScenario, ForecastState, TrackState, WeatherState
+from reglabsim.conditions.scenarios import (
+    ConditionsScenario,
+    ForecastState,
+    TrackState,
+    WeatherState,
+)
 
 
 class ConditionProfileRepository:
@@ -62,7 +67,9 @@ class ConditionProfileRepository:
             merged["forecast"] = {**merged.get("forecast", {}), **inline_forecast}
         return self._parse(merged, default_name=profile_id or "inline")
 
-    def _apply_inline_overrides(self, merged: dict[str, Any], inline_conditions: dict[str, Any]) -> None:
+    def _apply_inline_overrides(
+        self, merged: dict[str, Any], inline_conditions: dict[str, Any]
+    ) -> None:
         alias_map = {
             "air_temperature_c": "air_temp_c",
             "humidity_percent": "humidity_pct",
@@ -156,8 +163,12 @@ class ConditionProfileRepository:
         return ConditionsScenario(
             name=str(data.get("name", default_name)),
             weather=WeatherState(
-                air_temp_c=float(weather_source.get("air_temp_c", weather_source.get("air_temperature_c", 27.0))),
-                humidity_pct=float(weather_source.get("humidity_pct", weather_source.get("humidity_percent", 55.0))),
+                air_temp_c=float(
+                    weather_source.get("air_temp_c", weather_source.get("air_temperature_c", 27.0))
+                ),
+                humidity_pct=float(
+                    weather_source.get("humidity_pct", weather_source.get("humidity_percent", 55.0))
+                ),
                 pressure_hpa=float(weather_source.get("pressure_hpa", 1013.0)),
                 wind_speed_mps=float(weather_source.get("wind_speed_mps", 1.5)),
                 wind_direction_deg=float(weather_source.get("wind_direction_deg", 0.0)),
@@ -166,7 +177,9 @@ class ConditionProfileRepository:
                 visibility_m=float(weather_source.get("visibility_m", 1000.0)),
             ),
             track=TrackState(
-                track_temp_c=float(track_source.get("track_temp_c", track_source.get("track_temperature_c", 35.0))),
+                track_temp_c=float(
+                    track_source.get("track_temp_c", track_source.get("track_temperature_c", 35.0))
+                ),
                 grip_level=float(track_source.get("grip_level", 0.97)),
                 rubber_level=float(track_source.get("rubber_level", 0.35)),
                 wetness_level=float(track_source.get("wetness_level", 0.0)),
@@ -183,7 +196,9 @@ class ConditionProfileRepository:
                 cooling_penalty=float(track_source.get("cooling_penalty", 0.0)),
             ),
             forecast=ForecastState(
-                rain_expected_lap=forecast_source.get("rain_expected_lap", default.rain_expected_lap),
+                rain_expected_lap=forecast_source.get(
+                    "rain_expected_lap", default.rain_expected_lap
+                ),
                 confidence=float(forecast_source.get("confidence", default.confidence)),
                 rain_intensity_expected=str(
                     forecast_source.get("rain_intensity_expected", default.rain_intensity_expected)

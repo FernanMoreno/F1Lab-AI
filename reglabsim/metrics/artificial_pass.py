@@ -5,7 +5,7 @@ Measures overtakes caused by energy advantage vs natural pace.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from reglabsim.metrics.base import MetricBase
 from reglabsim.metrics.helpers import extract_events
@@ -17,14 +17,16 @@ class ArtificialPassIndex(MetricBase):
     High values indicate overtakes are caused by temporary energy advantage.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metric."""
         super().__init__(
             name="artificial_pass_index",
-            description="Measures share of overtakes primarily caused by temporary energy advantage",
+            description=(
+                "Measures share of overtakes primarily caused by temporary energy advantage"
+            ),
         )
 
-    def calculate(self, simulation_output: Dict[str, Any]) -> float:
+    def calculate(self, simulation_output: dict[str, Any]) -> float:
         """Calculate artificial pass index.
 
         Args:

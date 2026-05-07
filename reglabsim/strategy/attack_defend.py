@@ -26,7 +26,7 @@ class AttackDefendModel:
     Decides when to attack, defend, or maintain position.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize model."""
         pass
 

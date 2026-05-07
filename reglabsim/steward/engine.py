@@ -35,12 +35,16 @@ class StewardEngine:
             if event.event_type == "track_limit_breach":
                 if self._detected(event.details.get("detection_probability", 1.0), visibility):
                     car.warnings += 1
-                    penalty = 5.0 if car.warnings >= int(event.details.get("penalty_after", 4)) else 0.0
+                    penalty = (
+                        5.0 if car.warnings >= int(event.details.get("penalty_after", 4)) else 0.0
+                    )
                     car.penalties_s += penalty
                     decisions.append(
                         StewardDecision(
                             schema_version="steward_decision.v1",
-                            decision_type="track_limits_warning" if penalty == 0.0 else "track_limits_penalty",
+                            decision_type=(
+                                "track_limits_warning" if penalty == 0.0 else "track_limits_penalty"
+                            ),
                             lap=lap,
                             car_id=car.car_id,
                             penalty_s=penalty,

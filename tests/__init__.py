@@ -3,4 +3,4 @@
 This module contains the test suite for the F1Lab-AI platform.
 """
 
-__all__ = ["test_imports", "test_basic"]
+__all__ = ["test_basic", "test_imports"]

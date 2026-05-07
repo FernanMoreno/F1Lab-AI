@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from urllib.error import HTTPError
@@ -98,7 +99,8 @@ class OpenF1Client:
                 f"No OpenF1 session matched track={query.track_id} year={query.year} "
                 f"session={query.session_type}"
             )
-        return candidates.iloc[0].to_dict()
+        row = candidates.iloc[0].to_dict()
+        return {str(key): value for key, value in row.items()}
 
     def fetch_lap_data(self, circuit_id: str, session_type: str, year: int) -> pd.DataFrame:
         """Fetch lap timing data for a resolved OpenF1 session."""
@@ -243,7 +245,14 @@ class OpenF1Client:
         for attempt in range(self._max_retries):
             try:
                 with urlopen(url, timeout=self._timeout_s) as response:
-                    return json.loads(response.read().decode("utf-8"))
+                    payload = json.loads(response.read().decode("utf-8"))
+                    if not isinstance(payload, list):
+                        raise FetchError(f"OpenF1 payload for {url} is not a list")
+                    return [
+                        {str(key): value for key, value in item.items()}
+                        for item in payload
+                        if isinstance(item, dict)
+                    ]
             except HTTPError as exc:  # pragma: no cover - network failure path
                 last_error = exc
                 if exc.code == 429 and attempt < self._max_retries - 1:
@@ -277,16 +286,17 @@ class OpenF1Client:
         return lowered.replace(" ", "_")
 
     def _snake_case(self, value: str) -> str:
-        chars = []
+        chars: list[str] = []
         for char in value:
             if char.isupper() and chars:
                 chars.append("_")
             chars.append(char.lower() if char.isalnum() else "_")
         return "".join(chars).replace("__", "_").strip("_")
 
-    def _safe_frame(self, fetcher: Any) -> pd.DataFrame:
+    def _safe_frame(self, fetcher: Callable[[], pd.DataFrame]) -> pd.DataFrame:
         try:
-            return fetcher()
+            frame = fetcher()
+            return frame if isinstance(frame, pd.DataFrame) else pd.DataFrame(frame)
         except FetchError:
             return pd.DataFrame()
 

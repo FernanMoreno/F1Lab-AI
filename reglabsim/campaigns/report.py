@@ -25,7 +25,9 @@ def markdown_summary(run_output: dict[str, Any]) -> str:
     )
 
 
-def campaign_summary(campaign_name: str, runs: list[dict[str, Any]], ranking: list[dict[str, Any]]) -> dict[str, Any]:
+def campaign_summary(
+    campaign_name: str, runs: list[dict[str, Any]], ranking: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Build a compact campaign summary object."""
     return {
         "campaign_name": campaign_name,

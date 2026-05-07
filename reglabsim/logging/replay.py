@@ -44,7 +44,9 @@ class ReplayEngine:
             "failure_log": run_output.get("failure_log", []),
         }
 
-    def extract_policy_replay_actions(self, run_output: dict[str, Any]) -> dict[tuple[int, str], dict[str, Any]]:
+    def extract_policy_replay_actions(
+        self, run_output: dict[str, Any]
+    ) -> dict[tuple[int, str], dict[str, Any]]:
         """Build a lookup for policy replay mode."""
         replay_actions: dict[tuple[int, str], dict[str, Any]] = {}
         for entry in run_output.get("action_log", []):

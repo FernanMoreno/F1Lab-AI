@@ -6,7 +6,7 @@ Loads car family configurations from YAML files.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -24,14 +24,14 @@ class CarFamilyLoader:
         >>> family = loader.get_family("low_drag_missile")
     """
 
-    def __init__(self, config_path: Optional[Path] = None):
+    def __init__(self, config_path: Path | None = None):
         """Initialize loader.
 
         Args:
             config_path: Path to car_families.yaml.
         """
         self._config_path = config_path
-        self._families: Dict[str, CarFamily] = {}
+        self._families: dict[str, CarFamily] = {}
 
         if config_path:
             self.load_all()
@@ -45,16 +45,21 @@ class CarFamilyLoader:
         if not self._config_path or not self._config_path.exists():
             return 0
 
-        with open(self._config_path) as f:
-            data = yaml.safe_load(f)
+        with self._config_path.open(encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Car family config must be a mapping: {self._config_path}")
+        data = {str(key): value for key, value in loaded.items()}
 
         families_data = data.get("car_families", {})
+        if not isinstance(families_data, dict):
+            raise ValueError("car_families section must be a mapping")
         for family_id, family_data in families_data.items():
             self._families[family_id] = self._parse_family(family_id, family_data)
 
         return len(self._families)
 
-    def _parse_family(self, family_id: str, data: Dict) -> CarFamily:
+    def _parse_family(self, family_id: str, data: dict[str, Any]) -> CarFamily:
         """Parse family data into CarFamily object.
 
         Args:
@@ -96,7 +101,7 @@ class CarFamilyLoader:
             raise KeyError(f"Car family '{family_id}' not found")
         return self._families[family_id]
 
-    def list_families(self) -> List[str]:
+    def list_families(self) -> list[str]:
         """List all available family IDs.
 
         Returns:

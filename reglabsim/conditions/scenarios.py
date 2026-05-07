@@ -88,7 +88,9 @@ class ConditionsEvolutionModel:
         session_progress = lap / max(total_laps, 1)
         cooling_drag = 0.02 if safety_car_active else 0.0
         new_rubber = min(1.0, track.rubber_level + cars_on_track * 0.0008)
-        new_wetness = max(0.0, track.wetness_level + weather.rain_intensity_mm_h * 0.004 - track.drying_rate)
+        new_wetness = max(
+            0.0, track.wetness_level + weather.rain_intensity_mm_h * 0.004 - track.drying_rate
+        )
         new_grip = max(
             0.55,
             min(
@@ -105,11 +107,15 @@ class ConditionsEvolutionModel:
 
         new_weather = WeatherState(
             air_temp_c=weather.air_temp_c,
-            humidity_pct=min(100.0, max(0.0, weather.humidity_pct + weather.rain_intensity_mm_h * 0.03)),
+            humidity_pct=min(
+                100.0, max(0.0, weather.humidity_pct + weather.rain_intensity_mm_h * 0.03)
+            ),
             pressure_hpa=weather.pressure_hpa,
             wind_speed_mps=weather.wind_speed_mps,
             wind_direction_deg=weather.wind_direction_deg,
-            rain_intensity_mm_h=max(0.0, weather.rain_intensity_mm_h * (1.0 - session_progress * 0.03)),
+            rain_intensity_mm_h=max(
+                0.0, weather.rain_intensity_mm_h * (1.0 - session_progress * 0.03)
+            ),
             cloud_cover_pct=weather.cloud_cover_pct,
             visibility_m=max(120.0, weather.visibility_m - weather.rain_intensity_mm_h * 5.0),
         )

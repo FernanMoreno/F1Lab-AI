@@ -6,7 +6,6 @@ Synthetic car family archetypes for regulation testing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass(frozen=True)
@@ -43,8 +42,8 @@ class CarFamily:
     ers_efficiency: float
     tyre_deg_factor: float
     dirty_air_sensitivity: float
-    strength: List[str] = field(default_factory=list)
-    weakness: List[str] = field(default_factory=list)
+    strength: list[str] = field(default_factory=list)
+    weakness: list[str] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -84,7 +83,7 @@ class CarFamily:
         """
         return self.mass_kg + fuel_mass_kg
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         """Convert to dictionary."""
         return {
             "family_id": self.family_id,
