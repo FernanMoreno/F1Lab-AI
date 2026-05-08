@@ -16,7 +16,7 @@
     "query_session_key",
     "query_meeting_key"
   ],
-  "created_at_utc": "2026-05-07T18:31:04.025955+00:00",
+  "created_at_utc": "2026-05-07T23:33:34.028223+00:00",
   "data_path": "data\\silver\\openf1\\stints\\year=2024\\track=barcelona\\session=race\\data.parquet",
   "dataset_name": "stints",
   "layer": "silver",

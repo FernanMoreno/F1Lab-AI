@@ -1,0 +1,47 @@
+campaign_name: suzuka_spoon_falsification
+description: Slice-driven falsification run focused on Spoon closing-speed hazards.
+regulation: regulation_2026_refined
+track: suzuka
+scale_preset: mini
+mode: llm_event_driven
+sim_profile: adversarial
+seed: 42
+repetitions: 1
+weather_profile: dry_hot
+conditions:
+  air_temperature_c: 29
+  track_temperature_c: 38
+  humidity_percent: 50
+  wind_speed_mps: 4.0
+  wind_direction_deg: 120
+  rubber_level: 0.42
+  dirt_offline_level: 0.22
+forecast:
+  rain_expected_lap: null
+  confidence: 0.45
+  rain_intensity_expected: none
+  wind_warning: crosswind_spoon
+enforcement:
+  steward_strictness: medium
+objectives:
+  - unsafe_closing_speed
+  - no_escape_zone_failure
+  - wind_active_aero_instability
+falsification:
+  slice_id: suzuka_spoon_2026_closing_speed
+  sim_profile: adversarial
+  segment_focus:
+    - suzuka_spoon_entry
+  baseline_plausibility_score: 0.55
+  objectives:
+    maximize:
+      - competitive_gain
+      - closing_speed_hazard
+      - unsafe_legal_state_count
+    constrain:
+      - legal_or_grey_only
+      - public_plausibility_floor
+  patches:
+    - depleted_car_signal
+    - closing_speed_warning
+    - boost_derating_fast_corners

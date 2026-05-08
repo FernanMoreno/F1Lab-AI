@@ -45,6 +45,7 @@ class LocalRiskModel:
         visibility_m: float,
         wind_speed_mps: float,
         side_by_side: bool,
+        side_risk_weight: float = 0.08,
     ) -> LocalRiskAssessment:
         """Evaluate local risk for a potential battle event."""
         speed_ratio = min(
@@ -54,7 +55,7 @@ class LocalRiskModel:
         wet_factor = min(1.0, wetness_level)
         visibility_factor = 1.0 if visibility_m >= 800 else min(1.0, (800 - visibility_m) / 800)
         wind_factor = min(1.0, wind_speed_mps / 12.0)
-        side_factor = 0.2 if side_by_side else 0.0
+        side_factor = side_risk_weight if side_by_side else 0.0
         zone_risk = RISK_SCALE.get(segment.risk.energy_delta_sensitivity, 0.45)
         evasive_margin = RISK_SCALE.get(segment.risk.evasive_action_margin, 0.45)
 

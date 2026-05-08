@@ -5,7 +5,7 @@ length_m: 4940
 turns: 19
 laps: 62
 race_distance_m: 306143
-avg_speed_kph: 175
+avg_speed_kph: 181
 fidelity_level: 4
 sources:
   - formula1_circuit_guide

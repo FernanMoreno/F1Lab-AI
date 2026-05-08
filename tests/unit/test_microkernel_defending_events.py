@@ -158,9 +158,12 @@ def test_microkernel_emits_forcing_off_track_event() -> None:
 
 
 def test_microkernel_tags_late_braking_move_and_multiple_defensive_moves() -> None:
+    # Adversarial profile required: this scenario deliberately probes regulation-breaking
+    # defending behaviour under high pack pressure and closing speed.
     microkernel = RaceMicrokernel(
         regulation={"power_unit": {"ers_max_energy_mj": 6.0, "ers_deployment_max_kw": 250.0}},
         seed=9,
+        sim_profile="adversarial",
     )
     track = TrackModel(
         track_id="test_braking",

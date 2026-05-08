@@ -253,7 +253,15 @@ class PublicRacePackValidator:
             else 0.0
         )
         rain_intensity_mm_h = float(weather_frame["rainfall"].mean())
-        track_temp_c = air_temp_c + max(4.0, min(18.0, 8.0 + wind_speed_mps * 0.4))
+        # Prefer measured track temperature from the silver frame (OpenF1 provides it).
+        # Fall back to a physics-informed estimate only when the column is absent or all-null.
+        if (
+            "track_temperature" in weather_frame.columns
+            and weather_frame["track_temperature"].notna().any()
+        ):
+            track_temp_c = float(weather_frame["track_temperature"].mean())
+        else:
+            track_temp_c = air_temp_c + max(4.0, min(25.0, 8.0 + wind_speed_mps * 0.4))
         wetness_level = min(1.0, rain_intensity_mm_h / 8.0)
         visibility_m = (
             1000.0 if rain_intensity_mm_h < 0.5 else max(250.0, 1000.0 - rain_intensity_mm_h * 80.0)
@@ -303,13 +311,24 @@ class PublicRacePackValidator:
             return {
                 "status": "no_reports",
                 "mean_overall_score": 0.0,
+                "mean_baseline_plausibility_score": 0.0,
                 "mean_lap_mape_pct": 0.0,
                 "credible_proxy_count": 0,
+                "plausible_2026_count": 0,
                 "missing_tracks": required_tracks,
             }
 
         overall_scores = [
             float(report["public_validation"]["scorecard"]["overall_score"]) for report in reports
+        ]
+        plausibility_scores = [
+            float(
+                report["public_validation"]["scorecard"].get(
+                    "baseline_plausibility_score",
+                    report["public_validation"]["scorecard"]["overall_score"],
+                )
+            )
+            for report in reports
         ]
         lap_mapes = [
             float(report["public_validation"]["error_metrics"]["avg_lap_time_mape_pct"])
@@ -323,7 +342,14 @@ class PublicRacePackValidator:
             report["public_validation"]["scorecard"]["status"] == "credible_proxy"
             for report in reports
         )
+        plausible_2026_count = sum(
+            report["public_validation"]["scorecard"].get("baseline_status") == "plausible_2026"
+            for report in reports
+        )
         mean_overall_score = round(sum(overall_scores) / len(overall_scores), 4)
+        mean_baseline_plausibility_score = round(
+            sum(plausibility_scores) / len(plausibility_scores), 4
+        )
         mean_lap_mape_pct = round(sum(lap_mapes) / len(lap_mapes), 4)
         min_case_score = min(overall_scores)
         meets_thresholds = (
@@ -336,9 +362,11 @@ class PublicRacePackValidator:
         return {
             "status": "meets_thresholds" if meets_thresholds else "needs_calibration",
             "mean_overall_score": mean_overall_score,
+            "mean_baseline_plausibility_score": mean_baseline_plausibility_score,
             "min_case_overall_score": round(min_case_score, 4),
             "mean_lap_mape_pct": mean_lap_mape_pct,
             "credible_proxy_count": credible_proxy_count,
+            "plausible_2026_count": plausible_2026_count,
             "case_count": len(reports),
             "missing_tracks": missing_tracks,
         }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from reglabsim.data import (
     UnifiedDataSource,
 )
 from reglabsim.failures.classifier import FailureClassifier
+from reglabsim.failures.taxonomy import summarize_failures
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
@@ -978,6 +980,25 @@ class SimulationFacadeImpl:
             spec.seed = seed
         return self._campaign_runner().run_race(spec)
 
+    def run_falsification_slice(
+        self,
+        config_path: str | Path,
+        slice_id: str | None = None,
+        seed: int | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one slice-style race and enrich the output with evidence metadata."""
+        spec = CampaignSpec.from_yaml(config_path)
+        if slice_id is not None:
+            spec.falsification = dict(spec.falsification)
+            spec.falsification["slice_id"] = slice_id
+        if mode is not None:
+            spec.mode = mode
+        if seed is not None:
+            spec.seed = seed
+        run_output = self._campaign_runner().run_race(spec)
+        return self._enrich_falsification_run(run_output, spec=spec)
+
     def run_redteam_campaign(
         self, config_path: str | Path, budget: int | None = None
     ) -> dict[str, Any]:
@@ -1018,6 +1039,96 @@ class SimulationFacadeImpl:
 
     def propose_mitigations(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         return self._campaign_runner().propose_mitigations(run_output)
+
+    def replay_counterfactual(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        patch: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Replay one saved run under a candidate patch or mitigation."""
+        evaluation = self.evaluate_patch(run_output_or_path, patch=patch)
+        return {
+            "mode": "replay_counterfactual",
+            "patch": evaluation["patch"],
+            "original": evaluation["baseline_manifest"],
+            "counterfactual": evaluation["counterfactual_manifest"],
+            "comparison": evaluation["comparison"],
+            "rerun": evaluation["rerun"],
+        }
+
+    def evaluate_patch(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        patch: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one counterfactual rerun for an explicit patch or best candidate."""
+        run_output = self._resolve_run_output(run_output_or_path)
+        runner = self._campaign_runner()
+        candidate = self._normalize_patch_candidate(runner, run_output, patch)
+        spec = CampaignSpec.from_dict(run_output["spec"])
+        regulation_override, enforcement_override = runner._mitigations.apply_overrides(
+            base_regulation=runner._regulations[spec.regulation],
+            base_enforcement=spec.enforcement,
+            candidate=candidate,
+        )
+        rerun = runner.run_race(
+            spec,
+            track_id=run_output["manifest"]["track_id"],
+            regulation_override=regulation_override,
+            enforcement_override=enforcement_override,
+        )
+        rerun = self._enrich_falsification_run(rerun, spec=spec, patch=candidate)
+        before_summary = summarize_failures(run_output.get("failure_log", []))
+        after_summary = summarize_failures(rerun.get("failure_log", []))
+        before_incidents = int(run_output.get("metrics", {}).get("incident_count", 0))
+        after_incidents = int(rerun.get("metrics", {}).get("incident_count", 0))
+        return {
+            "mode": "evaluate_patch",
+            "patch": candidate,
+            "baseline_manifest": run_output["manifest"],
+            "counterfactual_manifest": rerun["manifest"],
+            "before_summary": before_summary,
+            "after_summary": after_summary,
+            "comparison": {
+                "before_failures": len(run_output.get("failure_log", [])),
+                "after_failures": len(rerun.get("failure_log", [])),
+                "before_incidents": before_incidents,
+                "after_incidents": after_incidents,
+                "priority_delta": round(
+                    before_summary["total_priority_score"] - after_summary["total_priority_score"],
+                    4,
+                ),
+            },
+            "rerun": rerun,
+        }
+
+    def export_evidence_bundle(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        output_dir: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Export one evidence bundle JSON without altering the base run layout."""
+        run_output = self._enrich_falsification_run(self._resolve_run_output(run_output_or_path))
+        bundle_dict = self._replay.build_evidence_bundle(run_output)
+        base_dir = (
+            Path(output_dir)
+            if output_dir is not None
+            else self._default_evidence_dir(run_output, run_output_or_path)
+        )
+        bundle_path = self._replay._resolve_bundle_path(
+            run_output_or_path, run_output, base_dir / "evidence_bundle.json"
+        )
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text(
+            json.dumps(bundle_dict, indent=2, ensure_ascii=True), encoding="utf-8"
+        )
+        return {
+            "bundle_path": str(bundle_path),
+            "manifest": bundle_dict.get("manifest", {}),
+            "included_sections": [
+                key for key in bundle_dict.keys() if key != "summary_markdown"
+            ],
+        }
 
     def compare_regulations(
         self,
@@ -1111,6 +1222,137 @@ class SimulationFacadeImpl:
         if not isinstance(loaded, dict):
             raise ValueError(f"YAML at {path} must decode to a mapping")
         return {str(key): value for key, value in loaded.items()}
+
+    def _resolve_run_output(
+        self, run_output_or_path: dict[str, Any] | str | Path
+    ) -> dict[str, Any]:
+        return (
+            self._replay.load_run(run_output_or_path)
+            if isinstance(run_output_or_path, (str, Path))
+            else run_output_or_path
+        )
+
+    def _normalize_patch_candidate(
+        self,
+        runner: CampaignRunner,
+        run_output: dict[str, Any],
+        patch: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if patch is None:
+            candidates = runner._mitigations.propose_candidates(run_output.get("failure_log", []))
+            return deepcopy(candidates[0])
+        candidate = patch.get("candidate", patch)
+        if not isinstance(candidate, dict):
+            raise ValueError("Patch candidate must be a mapping")
+        return {
+            "name": str(candidate.get("name", candidate.get("patch_id", "custom_patch"))),
+            "description": str(candidate.get("description", "")),
+            "failure_targets": list(candidate.get("failure_targets", [])),
+            "regulation_overrides": deepcopy(
+                candidate.get("regulation_overrides", candidate.get("regulation_override", {}))
+                or {}
+            ),
+            "enforcement_overrides": deepcopy(
+                candidate.get("enforcement_overrides", candidate.get("enforcement_override", {}))
+                or {}
+            ),
+            "expected_tradeoffs": list(
+                candidate.get("expected_tradeoffs", candidate.get("tradeoffs", [])) or []
+            ),
+        }
+
+    def _enrich_falsification_run(
+        self,
+        run_output: dict[str, Any],
+        *,
+        spec: CampaignSpec | None = None,
+        patch: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        spec_payload = run_output.get("spec")
+        if spec_payload is None and spec is not None:
+            spec_payload = spec.to_dict()
+            run_output["spec"] = spec_payload
+        if not isinstance(spec_payload, dict):
+            return run_output
+        falsification = spec_payload.get("falsification", {})
+        if not isinstance(falsification, dict):
+            falsification = {}
+        manifest = run_output.setdefault("manifest", {})
+        if not isinstance(manifest, dict):
+            return run_output
+        seed = manifest.get("seed", spec_payload.get("seed", "unknown"))
+        manifest.setdefault(
+            "slice_id",
+            str(
+                falsification.get(
+                    "slice_id",
+                    spec_payload.get("campaign_name", manifest.get("race_name", "falsification")),
+                )
+            ),
+        )
+        manifest.setdefault(
+            "world_id",
+            str(falsification.get("world_id", f"{manifest.get('track_id', 'track')}-seed-{seed}")),
+        )
+        if patch is not None:
+            manifest["patch_id"] = str(patch.get("name", patch.get("patch_id", "custom_patch")))
+        else:
+            manifest.setdefault("patch_id", falsification.get("patch_id"))
+        for key in (
+            "public_anchor_score",
+            "baseline_plausibility_score",
+            "regulation_breaking_score",
+        ):
+            manifest.setdefault(key, falsification.get(key))
+        run_output["falsification"] = {
+            **falsification,
+            "slice_id": manifest.get("slice_id"),
+            "world_id": manifest.get("world_id"),
+            "patch_id": manifest.get("patch_id"),
+            "scores": {
+                "public_anchor_score": manifest.get("public_anchor_score"),
+                "baseline_plausibility_score": manifest.get("baseline_plausibility_score"),
+                "regulation_breaking_score": manifest.get("regulation_breaking_score"),
+            },
+        }
+        self._persist_falsification_metadata(run_output)
+        return run_output
+
+    def _persist_falsification_metadata(self, run_output: dict[str, Any]) -> None:
+        run_dir = self._run_directory_for_output(run_output)
+        if run_dir is None:
+            return
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for key in ("manifest", "spec", "falsification"):
+            if key not in run_output:
+                continue
+            (run_dir / f"{key}.json").write_text(
+                json.dumps(run_output[key], indent=2, ensure_ascii=True),
+                encoding="utf-8",
+            )
+
+    def _run_directory_for_output(self, run_output: dict[str, Any]) -> Path | None:
+        manifest = run_output.get("manifest", {})
+        spec_payload = run_output.get("spec", {})
+        if not isinstance(manifest, dict) or not isinstance(spec_payload, dict):
+            return None
+        run_id = manifest.get("run_id")
+        output_root = spec_payload.get("output_root")
+        if not run_id or not output_root:
+            return None
+        return Path(output_root) / str(run_id)
+
+    def _default_evidence_dir(
+        self,
+        run_output: dict[str, Any],
+        run_output_or_path: dict[str, Any] | str | Path,
+    ) -> Path:
+        if isinstance(run_output_or_path, (str, Path)):
+            return Path(run_output_or_path)
+        run_dir = self._run_directory_for_output(run_output)
+        if run_dir is not None:
+            return run_dir
+        return Path("outputs/evidence") / str(run_output.get("manifest", {}).get("run_id", "adhoc"))
 
     @staticmethod
     def _require_float(value: Any, label: str) -> float:

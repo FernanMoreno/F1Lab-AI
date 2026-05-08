@@ -24,7 +24,7 @@
     "query_session_key",
     "query_meeting_key"
   ],
-  "created_at_utc": "2026-05-07T19:30:51.524765+00:00",
+  "created_at_utc": "2026-05-07T23:30:57.387424+00:00",
   "data_path": "data\\silver\\openf1\\sessions\\year=2024\\track=singapore\\session=race\\data.parquet",
   "dataset_name": "sessions",
   "layer": "silver",

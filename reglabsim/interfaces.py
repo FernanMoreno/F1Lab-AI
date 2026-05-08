@@ -578,6 +578,15 @@ class SimulationFacade(Protocol):
         """Run a multiagent race from campaign YAML."""
         ...
 
+    def run_falsification_slice(
+        self,
+        config_path: str | Path,
+        slice_id: str | None = None,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        """Run one falsification slice with auditable evidence outputs."""
+        ...
+
     def run_redteam_campaign(
         self,
         config_path: str | Path,
@@ -592,6 +601,31 @@ class SimulationFacade(Protocol):
         mode: str = "replay_audit_exact",
     ) -> dict[str, Any]:
         """Replay or re-simulate a saved run."""
+        ...
+
+    def replay_counterfactual(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        patch: dict[str, Any],
+        mode: str = "counterfactual_patch",
+    ) -> dict[str, Any]:
+        """Replay one saved run under a specific regulatory or enforcement patch."""
+        ...
+
+    def evaluate_patch(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate one explicit counterfactual patch on a saved run."""
+        ...
+
+    def export_evidence_bundle(
+        self,
+        run_output_or_path: dict[str, Any] | str | Path,
+        output_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Export one normalized evidence bundle for replay, audit, and reporting."""
         ...
 
     def classify_failures(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:

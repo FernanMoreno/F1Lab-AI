@@ -11,7 +11,7 @@
     "source",
     "dataset_name"
   ],
-  "created_at_utc": "2026-05-07T18:26:38.252603+00:00",
+  "created_at_utc": "2026-05-07T23:54:30.291993+00:00",
   "data_path": "data\\raw\\openf1\\stints\\year=2024\\track=monza\\session=race\\data.parquet",
   "dataset_name": "stints",
   "layer": "raw",

@@ -13,7 +13,7 @@
     "query_session_key",
     "query_meeting_key"
   ],
-  "created_at_utc": "2026-05-07T18:24:40.511957+00:00",
+  "created_at_utc": "2026-05-07T23:47:30.121301+00:00",
   "data_path": "data\\silver\\openf1\\position\\year=2024\\track=suzuka\\session=race\\data.parquet",
   "dataset_name": "position",
   "layer": "silver",

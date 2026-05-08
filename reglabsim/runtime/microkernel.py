@@ -15,7 +15,9 @@ from reglabsim.conditions.scenarios import (
 from reglabsim.race.dirty_air import DirtyAirModel
 from reglabsim.race.slipstream import SlipstreamModel
 from reglabsim.race.traffic import TrafficModel
+from reglabsim.runtime.action_validator import ActionValidator
 from reglabsim.runtime.schema import CarRuntimeState, RaceAction, RaceEvent, RaceStateSnapshot
+from reglabsim.safety import PROFILE_CALIBRATIONS, TRACK_MODIFIERS, SafetyEventType, SafetyModel
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskAssessment, LocalRiskModel
 from reglabsim.track.segments import TrackSegment
@@ -46,6 +48,55 @@ DEFAULT_BATTLE_CALIBRATION = {
     "incident_risk_scale": 1.0,
     "track_limit_scale": 1.0,
     "defense_event_scale": 1.0,
+}
+UNSAFE_LEGAL_RUNOFF_TYPES = {
+    "grass",
+    "gravel",
+    "wall_close",
+    "wall",
+    "barrier",
+    "concrete",
+    "grass_gravel_barrier",
+}
+UNSAFE_LEGAL_SEGMENT_TYPES = {
+    "corner",
+    "sweeper",
+    "braking_zone",
+    "chicane",
+    "high_speed_corner_entry",
+    "ultra_fast_corner",
+    "fast_corner",
+}
+
+# Per-profile physics aggressiveness defaults.
+# public_baseline: plausible 2026 race season — not a replay of 2024.
+# stress: elevated pack/energy dynamics for regulatory stress testing.
+# adversarial: search-mode for regulation-breaking edge cases.
+SIM_PROFILE_DEFAULTS: dict[str, dict[str, float]] = {
+    "public_baseline": {
+        "incident_risk_scale": 0.55,
+        "retirement_damage_threshold": 0.75,
+        "retirement_probability_per_lap": 0.025,
+        "closing_speed_bias_kph": 1.5,
+        "side_risk_weight": 0.06,
+        "pack_pressure_weight": 0.04,
+    },
+    "stress": {
+        "incident_risk_scale": 0.80,
+        "retirement_damage_threshold": 0.60,
+        "retirement_probability_per_lap": 0.05,
+        "closing_speed_bias_kph": 4.0,
+        "side_risk_weight": 0.10,
+        "pack_pressure_weight": 0.08,
+    },
+    "adversarial": {
+        "incident_risk_scale": 1.0,
+        "retirement_damage_threshold": 0.50,
+        "retirement_probability_per_lap": 0.08,
+        "closing_speed_bias_kph": 7.0,
+        "side_risk_weight": 0.14,
+        "pack_pressure_weight": 0.12,
+    },
 }
 
 
@@ -81,14 +132,6 @@ class _BattleContext:
 
 
 @dataclass(frozen=True)
-class _BattleResult:
-    event_type: str
-    segment_id: str
-    details: dict[str, Any]
-    defending_event: RaceEvent | None
-
-
-@dataclass(frozen=True)
 class _PackContext:
     nearest_rival_id: str
     nearest_gap_s: float
@@ -112,6 +155,7 @@ class RaceMicrokernel:
         regulation: dict[str, Any],
         seed: int,
         battle_calibration: dict[str, float] | None = None,
+        sim_profile: str = "public_baseline",
     ):
         self._regulation = regulation
         self._rng = np.random.default_rng(seed)
@@ -124,6 +168,22 @@ class RaceMicrokernel:
             **DEFAULT_BATTLE_CALIBRATION,
             **(battle_calibration or {}),
         }
+        _base_profile = SIM_PROFILE_DEFAULTS.get(
+            sim_profile, SIM_PROFILE_DEFAULTS["public_baseline"]
+        )
+        # battle_calibration keys can override individual profile values
+        self._profile: dict[str, float] = {
+            **_base_profile,
+            **{k: v for k, v in (battle_calibration or {}).items() if k in _base_profile},
+        }
+        # Keep incident_risk_scale in sync: battle_calibration["incident_risk_scale"]
+        # takes precedence over profile, then profile over DEFAULT_BATTLE_CALIBRATION.
+        self._battle_calibration["incident_risk_scale"] = self._profile["incident_risk_scale"]
+        safety_cal = PROFILE_CALIBRATIONS.get(
+            sim_profile, PROFILE_CALIBRATIONS["public_baseline"]
+        )
+        self._safety_model = SafetyModel(safety_cal, self._rng)
+        self._current_track_modifier: dict[str, float] = {}
 
     def snapshot(
         self,
@@ -179,6 +239,8 @@ class RaceMicrokernel:
         safety_car_active: bool,
     ) -> tuple[list[CarRuntimeState], list[RaceEvent], list[dict[str, Any]]]:
         """Resolve one lap deterministically."""
+        self._safety_model.tick()
+        self._current_track_modifier = TRACK_MODIFIERS.get(track.track_id, {})
         segment = track.get_primary_battle_segment()
         high_risk_segment = track.get_high_risk_segment()
         lap_records: list[dict[str, Any]] = []
@@ -205,7 +267,7 @@ class RaceMicrokernel:
             old_position = pre_battle[car.car_id].position
 
             if old_position > car.position:
-                battle_result = self._battle_events_for_position_change(
+                battle_events = self._battle_events_for_position_change(
                     lap=lap,
                     current_car=car,
                     old_position=old_position,
@@ -219,21 +281,11 @@ class RaceMicrokernel:
                     track_state=track_state,
                     pre_battle=pre_battle,
                 )
-                if battle_result is not None:
-                    events.append(
-                        RaceEvent(
-                            event_type=battle_result.event_type,
-                            lap=lap,
-                            car_id=battle_result.details["attacker_id"],
-                            segment_id=battle_result.segment_id,
-                            details=battle_result.details,
-                        )
-                    )
-                    if battle_result.defending_event is not None:
-                        events.append(battle_result.defending_event)
+                events.extend(battle_events)
 
         for car in active_cars:
-            if car.damage > 0.5 and self._rng.random() < 0.08:
+            retire_prob = self._safety_model.retirement_probability(car.damage)
+            if retire_prob > 0.0 and self._rng.random() < retire_prob:
                 car.retired = True
                 events.append(
                     RaceEvent(
@@ -575,7 +627,7 @@ class RaceMicrokernel:
         weather: WeatherState,
         track_state: TrackState,
         pre_battle: dict[str, _BattleSnapshot],
-    ) -> _BattleResult | None:
+    ) -> list[RaceEvent]:
         attacker, defender = self._battle_pair(
             current_car=current_car,
             old_position=old_position,
@@ -602,25 +654,105 @@ class RaceMicrokernel:
             attacker_committed=actions[attacker.car_id].attack,
             defender_committed=actions[defender.car_id].defend,
         ):
-            return None
+            return []
+        attacker_verdict = ActionValidator.classify_legality(
+            actions[attacker.car_id], self._regulation
+        )
+        defender_verdict = ActionValidator.classify_legality(
+            actions[defender.car_id], self._regulation
+        )
         details = self._build_battle_details(attacker=attacker, defender=defender, battle=battle)
+        details["attacker_legal_status"] = attacker_verdict["status"]
+        details["defender_legal_status"] = defender_verdict["status"]
+        details["battle_legal_status"] = self._merge_legal_status(
+            attacker_verdict["status"], defender_verdict["status"]
+        )
         adjusted_risk = min(
             1.0,
             battle.risk.accident_risk * self._battle_calibration["incident_risk_scale"],
         )
         details["accident_risk_adjusted"] = adjusted_risk
-        event_type = "overtake"
-        segment_id = battle.battle_segment.segment_id
-        if adjusted_risk > 0.88:
-            event_type = "incident"
-            segment_id = battle.incident_segment.segment_id
-            self._apply_incident_damage(
-                attacker=attacker,
-                defender=defender,
-                adjusted_risk=adjusted_risk,
-                impact_severity=battle.risk.impact_severity_estimate,
+
+        # Sample typed safety events using RAW accident_risk (not the globally scaled value).
+        # incident_risk_scale was designed for the old binary threshold and must not gate
+        # the graduated safety taxonomy — SafetyCalibration handles its own thresholds.
+        safety_events = self._safety_model.sample_events(
+            risk=battle.risk.accident_risk,
+            lap=lap,
+            attacker_id=attacker.car_id,
+            defender_id=defender.car_id,
+            segment_id=battle.incident_segment.segment_id,
+            track_modifier=self._current_track_modifier,
+        )
+
+        # Apply damage from physical contacts
+        for se in safety_events:
+            if se.event_type == SafetyEventType.MINOR_CONTACT:
+                attacker.damage = min(1.0, attacker.damage + se.damage_delta)
+            elif se.event_type == SafetyEventType.MAJOR_CONTACT:
+                attacker.damage = min(1.0, attacker.damage + se.damage_delta)
+                def_dmg = float(se.details.get("defender_damage_delta", se.damage_delta * 1.2))
+                defender.damage = min(1.0, defender.damage + def_dmg)
+
+        # Main battle event: incident if major contact, overtake otherwise
+        has_major = any(se.event_type == SafetyEventType.MAJOR_CONTACT for se in safety_events)
+        main_event_type = "incident" if has_major else "overtake"
+        main_segment = (
+            battle.incident_segment.segment_id if has_major else battle.battle_segment.segment_id
+        )
+
+        race_events: list[RaceEvent] = [
+            RaceEvent(
+                event_type=main_event_type,
+                lap=lap,
+                car_id=attacker.car_id,
+                segment_id=main_segment,
                 details=details,
             )
+        ]
+
+        # Add informational safety events to the event log
+        for se in safety_events:
+            if se.event_type in (SafetyEventType.NEAR_MISS, SafetyEventType.WARNING):
+                race_events.append(
+                    RaceEvent(
+                        event_type=se.event_type.value,
+                        lap=lap,
+                        car_id=se.car_id,
+                        segment_id=se.segment_id,
+                        details={"risk": se.risk, "rival_car_id": se.rival_car_id},
+                    )
+                )
+            elif se.event_type == SafetyEventType.MINOR_CONTACT:
+                race_events.append(
+                    RaceEvent(
+                        event_type=se.event_type.value,
+                        lap=lap,
+                        car_id=se.car_id,
+                        segment_id=se.segment_id,
+                        details={"risk": se.risk, "damage_delta": se.damage_delta},
+                    )
+                )
+
+        unsafe_legal_event = self._unsafe_legal_companion_event(
+            lap=lap,
+            attacker=attacker,
+            defender=defender,
+            attacker_action=actions[attacker.car_id],
+            defender_action=actions[defender.car_id],
+            battle=battle,
+            adjusted_risk=adjusted_risk,
+            track=track,
+            weather=weather,
+            track_state=track_state,
+            safety_events=safety_events,
+            main_event_type=main_event_type,
+            attacker_verdict=attacker_verdict,
+            defender_verdict=defender_verdict,
+        )
+        if unsafe_legal_event is not None:
+            race_events.append(unsafe_legal_event)
+
         defending_event = self._defending_infraction_event(
             lap=lap,
             attacker=attacker,
@@ -632,11 +764,199 @@ class RaceMicrokernel:
             battle=battle,
             adjusted_risk=adjusted_risk,
         )
-        return _BattleResult(
-            event_type=event_type,
-            segment_id=segment_id,
-            details=details,
-            defending_event=defending_event,
+        if defending_event is not None:
+            race_events.append(defending_event)
+
+        return race_events
+
+    def _merge_legal_status(self, attacker_status: str, defender_status: str) -> str:
+        if "ILLEGAL" in {attacker_status, defender_status}:
+            return "ILLEGAL"
+        if "GREY_AREA" in {attacker_status, defender_status}:
+            return "GREY_AREA"
+        return "LEGAL"
+
+    def _unsafe_legal_companion_event(
+        self,
+        *,
+        lap: int,
+        attacker: CarRuntimeState,
+        defender: CarRuntimeState,
+        attacker_action: RaceAction,
+        defender_action: RaceAction,
+        battle: _BattleContext,
+        adjusted_risk: float,
+        track: TrackModel,
+        weather: WeatherState,
+        track_state: TrackState,
+        safety_events: list[Any],
+        main_event_type: str,
+        attacker_verdict: dict[str, Any],
+        defender_verdict: dict[str, Any],
+    ) -> RaceEvent | None:
+        if any(
+            se.event_type in {SafetyEventType.MINOR_CONTACT, SafetyEventType.MAJOR_CONTACT}
+            for se in safety_events
+        ):
+            return None
+
+        combined_status = self._merge_legal_status(
+            attacker_verdict["status"], defender_verdict["status"]
+        )
+        if combined_status not in {"LEGAL", "GREY_AREA"}:
+            return None
+
+        segment = battle.battle_segment
+        spoon_like_geometry = (
+            segment.segment_type in UNSAFE_LEGAL_SEGMENT_TYPES
+            and segment.width_m <= 13.5
+            and segment.risk.side_by_side_risk in {"high", "critical"}
+            and (
+                segment.runoff.type in UNSAFE_LEGAL_RUNOFF_TYPES
+                or segment.runoff.rejoin_risk in {"high", "critical"}
+                or segment.risk.barrier_distance_m <= 18.0
+            )
+        )
+        if not spoon_like_geometry:
+            return None
+
+        unsafe_candidate = (
+            attacker_verdict["unsafe_legal_candidate"]
+            or defender_verdict["unsafe_legal_candidate"]
+        )
+        if not unsafe_candidate:
+            return None
+
+        closing_trigger_kph = max(
+            24.0,
+            battle.battle_segment.risk.unsafe_closing_speed_threshold_kph * 0.72,
+        )
+        closing_pressure = min(
+            1.0,
+            max(0.0, battle.closing_speed_kph - closing_trigger_kph) / 18.0,
+        )
+        width_pressure = min(1.0, max(0.0, (12.5 - segment.width_m) / 3.5))
+        runoff_pressure = 1.0 if segment.runoff.type in UNSAFE_LEGAL_RUNOFF_TYPES else 0.55
+        visibility_pressure = min(1.0, max(0.0, (900.0 - weather.visibility_m) / 500.0))
+        wet_pressure = min(1.0, track_state.wetness_level)
+        tag_pressure = 0.0
+        if "no_escape_zone_failure" in battle.risk.recommended_failure_tags:
+            tag_pressure += 0.06
+        if "tight_spatial_failure" in battle.risk.recommended_failure_tags:
+            tag_pressure += 0.03
+        hazard_score = round(
+            min(
+                1.0,
+                0.28
+                + adjusted_risk * 0.32
+                + closing_pressure * 0.18
+                + width_pressure * 0.08
+                + runoff_pressure * 0.06
+                + visibility_pressure * 0.04
+                + wet_pressure * 0.04
+                + battle.pack_compression_ratio * 0.08
+                + tag_pressure,
+            ),
+            3,
+        )
+        if battle.closing_speed_kph < closing_trigger_kph or hazard_score < 0.6:
+            return None
+
+        reason_codes = list(
+            dict.fromkeys(
+                attacker_verdict["reason_codes"] + defender_verdict["reason_codes"]
+            )
+        )
+        grey_area_flags = list(
+            dict.fromkeys(
+                attacker_verdict["grey_area_flags"] + defender_verdict["grey_area_flags"]
+            )
+        )
+        supporting_events = [
+            se.event_type.value
+            for se in safety_events
+            if se.event_type in {SafetyEventType.NEAR_MISS, SafetyEventType.WARNING}
+        ]
+        relative_speed_mps = max(0.1, battle.closing_speed_kph / 3.6)
+        time_to_collision_s = round(battle.battle_distance_m / relative_speed_mps, 3)
+        reaction_margin_s = round(
+            time_to_collision_s * battle.risk.evasive_action_success_probability,
+            3,
+        )
+        regulatory_causes = list(dict.fromkeys(reason_codes + grey_area_flags))
+        track_amplifiers: list[str] = []
+        if segment.risk.barrier_distance_m <= 18.0:
+            track_amplifiers.append("low_escape_margin")
+        if segment.segment_type in {"high_speed_corner_entry", "ultra_fast_corner", "corner"}:
+            track_amplifiers.append("fast_corner_geometry")
+        if segment.runoff.rejoin_risk in {"high", "critical"}:
+            track_amplifiers.append("unsafe_rejoin_surface")
+        surface_amplifiers = [segment.runoff.type] if segment.runoff.type else []
+        condition_amplifiers: list[str] = []
+        if weather.visibility_m < 900.0:
+            condition_amplifiers.append("reduced_visibility")
+        if track_state.wetness_level > 0.1:
+            condition_amplifiers.append("damp_offline_grip")
+        if weather.wind_speed_mps > 6.0:
+            condition_amplifiers.append("crosswind_instability")
+        perception_amplifiers: list[str] = []
+        if weather.visibility_m < 900.0 or battle.closing_speed_kph >= closing_trigger_kph + 8.0:
+            perception_amplifiers.append("closing_speed_perception_delay")
+        pack_amplifiers: list[str] = []
+        if battle.pack_compression_ratio >= 0.35:
+            pack_amplifiers.append("pack_compression")
+        recommended_failure_tags = list(dict.fromkeys(battle.risk.recommended_failure_tags))
+        if "unsafe_closing_speed" not in recommended_failure_tags:
+            recommended_failure_tags.append("unsafe_closing_speed")
+        if combined_status == "GREY_AREA":
+            recommended_failure_tags.append("grey_area_exploit")
+        slice_hint = "suzuka_spoon_style"
+        if track.track_id != "suzuka" and "spoon" not in segment.name.lower():
+            slice_hint = "fast_corner_unsafe_legal"
+
+        return RaceEvent(
+            event_type="unsafe_legal_state",
+            lap=lap,
+            car_id=defender.car_id if defender_action.defend else attacker.car_id,
+            segment_id=segment.segment_id,
+            details={
+                "attacker_id": attacker.car_id,
+                "defender_id": defender.car_id,
+                "legal_status": combined_status,
+                "safety_status": "UNSAFE_LEGAL",
+                "companion_event_type": main_event_type,
+                "non_contact": True,
+                "hazard_score": hazard_score,
+                "reaction_margin_s": reaction_margin_s,
+                "time_to_collision_s": time_to_collision_s,
+                "closing_speed_kph": battle.closing_speed_kph,
+                "unsafe_closing_speed_threshold_kph": (
+                    segment.risk.unsafe_closing_speed_threshold_kph
+                ),
+                "battle_distance_m": battle.battle_distance_m,
+                "overtake_probability": battle.overtake_probability,
+                "pack_compression_ratio": battle.pack_compression_ratio,
+                "local_density": battle.local_density,
+                "runoff_type": segment.runoff.type,
+                "segment_name": segment.name,
+                "segment_type": segment.segment_type,
+                "slice_hint": slice_hint,
+                "reason_codes": reason_codes,
+                "grey_area_flags": grey_area_flags,
+                "regulatory_causes": regulatory_causes,
+                "track_amplifiers": track_amplifiers,
+                "surface_amplifiers": surface_amplifiers,
+                "condition_amplifiers": condition_amplifiers,
+                "perception_amplifiers": perception_amplifiers,
+                "pack_amplifiers": pack_amplifiers,
+                "supporting_safety_events": supporting_events,
+                "confidence": "medium" if hazard_score >= 0.72 else "low",
+                "recommended_failure_tags": recommended_failure_tags,
+                "steward_review_recommended": (
+                    attacker_verdict["steward_review_recommended"]
+                    or defender_verdict["steward_review_recommended"]
+                ),
+            },
         )
 
     def _build_battle_details(
@@ -666,24 +986,6 @@ class RaceMicrokernel:
             "accident_risk": battle.risk.accident_risk,
             "recommended_failure_tags": battle.risk.recommended_failure_tags,
         }
-
-    def _apply_incident_damage(
-        self,
-        *,
-        attacker: CarRuntimeState,
-        defender: CarRuntimeState,
-        adjusted_risk: float,
-        impact_severity: str,
-        details: dict[str, Any],
-    ) -> None:
-        if self._rng.random() >= min(0.95, adjusted_risk):
-            return
-        defender.damage = min(1.0, defender.damage + 0.22)
-        attacker.damage = min(1.0, attacker.damage + 0.14)
-        details["impact_severity"] = impact_severity
-        if impact_severity == "critical" and self._rng.random() < 0.35:
-            defender.retired = True
-            details["retired_car"] = defender.car_id
 
     def _resolve_battle_context(
         self,
@@ -735,6 +1037,14 @@ class RaceMicrokernel:
             0.9,
             pack.pack_compression_ratio * max(0.0, pack.local_density - 0.8) * 0.45,
         )
+        # 2026: closing speed from regulation-aware aero and energy components.
+        # Straight mode unlocks drag reduction proportional to ERS state (F1 active-aero).
+        _straight_mode_kph = 0.0
+        if attacker_action.aero_mode == "straight":
+            _straight_mode_kph = 2.0 + attacker.ers_soc * 2.5  # 2.0-4.5 kph
+        # Defender keeping corner mode = extra drag = closing gain for attacker.
+        _corner_mode_drag_kph = 1.5 if defender_action.aero_mode == "corner" else 0.0
+        active_aero_delta_kph = _straight_mode_kph + _corner_mode_drag_kph
         closing_speed_kph = max(
             0.0,
             (
@@ -744,7 +1054,8 @@ class RaceMicrokernel:
                 + max(0.0, attacker.ers_soc - defender.ers_soc) * 8.0
                 + pack.pack_compression_ratio * 6.5
                 + max(0.0, pack.local_density - 1.0) * 2.6
-                + 12.0
+                + active_aero_delta_kph
+                + self._profile["closing_speed_bias_kph"]
             )
             * self._battle_calibration["closing_speed_scale"],
         )
@@ -776,6 +1087,7 @@ class RaceMicrokernel:
             visibility_m=weather.visibility_m,
             wind_speed_mps=weather.wind_speed_mps,
             side_by_side=True,
+            side_risk_weight=self._profile["side_risk_weight"],
         )
         risk = self._risk_with_pack_pressure(risk=risk, pack=pack)
         return _BattleContext(
@@ -857,11 +1169,12 @@ class RaceMicrokernel:
         risk: LocalRiskAssessment,
         pack: _PackContext,
     ) -> LocalRiskAssessment:
+        pw = self._profile["pack_pressure_weight"]
         adjusted_risk = min(
             1.0,
             risk.accident_risk
-            + pack.pack_compression_ratio * 0.05
-            + max(0, pack.pack_cars_within_2s - 2) * 0.015,
+            + pack.pack_compression_ratio * pw
+            + max(0, pack.pack_cars_within_2s - 2) * (pw * 0.3),
         )
         if adjusted_risk >= 0.82:
             severity = "critical"

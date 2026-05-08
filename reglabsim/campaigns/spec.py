@@ -56,6 +56,8 @@ class CampaignSpec:
     weather_profile: str = "inline"
     lap_calibration_profile: dict[str, float] = field(default_factory=dict)
     battle_calibration_profile: dict[str, float] = field(default_factory=dict)
+    sim_profile: str = "public_baseline"
+    falsification: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> CampaignSpec:
@@ -99,6 +101,9 @@ class CampaignSpec:
         num_cars = int(data.get("num_cars", preset.get("num_cars", 6)))
         laps = int(data.get("laps", data.get("simulation", {}).get("laps", preset.get("laps", 12))))
         conditions = cls._parse_conditions(data.get("conditions", {}), data.get("forecast", {}))
+        falsification = data.get("falsification", {})
+        if falsification and not isinstance(falsification, dict):
+            raise ValueError("Campaign config 'falsification' must be a mapping")
         track = data.get("track")
         tracks = data.get("tracks", [track] if track else ["suzuka"])
         return cls(
@@ -130,6 +135,13 @@ class CampaignSpec:
             weather_profile=data.get("weather_profile", "inline"),
             lap_calibration_profile=dict(data.get("lap_calibration_profile", {})),
             battle_calibration_profile=dict(data.get("battle_calibration_profile", {})),
+            sim_profile=str(
+                data.get(
+                    "sim_profile",
+                    falsification.get("sim_profile", "public_baseline"),
+                )
+            ),
+            falsification=dict(falsification),
         )
 
     @staticmethod

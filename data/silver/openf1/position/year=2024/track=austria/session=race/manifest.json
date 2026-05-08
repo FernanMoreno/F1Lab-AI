@@ -13,7 +13,7 @@
     "query_session_key",
     "query_meeting_key"
   ],
-  "created_at_utc": "2026-05-07T19:28:27.924574+00:00",
+  "created_at_utc": "2026-05-07T23:28:23.696870+00:00",
   "data_path": "data\\silver\\openf1\\position\\year=2024\\track=austria\\session=race\\data.parquet",
   "dataset_name": "position",
   "layer": "silver",

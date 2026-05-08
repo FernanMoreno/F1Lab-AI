@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from typing import Any
 
 RACE_OBSERVATION_SCHEMA = "race_observation.v1"
@@ -13,6 +14,35 @@ STEWARD_DECISION_SCHEMA = "steward_decision.v1"
 FAILURE_EVENT_SCHEMA = "failure_event.v1"
 RACE_STATE_SCHEMA = "race_state_snapshot.v1"
 CAMPAIGN_REPORT_SCHEMA = "campaign_report.v1"
+WORLD_MANIFEST_SCHEMA = "world_manifest.v1"
+LEGAL_VERDICT_SCHEMA = "legal_verdict.v1"
+SAFETY_VERDICT_SCHEMA = "safety_verdict.v1"
+ENFORCEMENT_ASSESSMENT_SCHEMA = "enforcement_assessment.v1"
+UNSAFE_LEGAL_STATE_SCHEMA = "unsafe_legal_state_event.v1"
+MITIGATION_RESULT_SCHEMA = "mitigation_result.v1"
+REGULATORY_PATCH_SCHEMA = "regulatory_patch.v1"
+EVENT_ENVELOPE_SCHEMA = "event_envelope.v1"
+EVIDENCE_BUNDLE_SCHEMA = "evidence_bundle.v1"
+
+
+class LegalStatus(StrEnum):
+    """Closed legal verdicts for falsification slices."""
+
+    LEGAL = "LEGAL"
+    ILLEGAL = "ILLEGAL"
+    GREY_AREA = "GREY_AREA"
+    SPIRIT_VIOLATION = "SPIRIT_VIOLATION"
+    NEEDS_STEWARD_REVIEW = "NEEDS_STEWARD_REVIEW"
+    NEEDS_TECHNICAL_DIRECTIVE = "NEEDS_TECHNICAL_DIRECTIVE"
+
+
+class SafetyStatus(StrEnum):
+    """Closed safety verdicts for falsification slices."""
+
+    SAFE = "SAFE"
+    HIGH_RISK = "HIGH_RISK"
+    UNSAFE_LEGAL = "UNSAFE_LEGAL"
+    CRITICAL = "CRITICAL"
 
 
 @dataclass
@@ -204,6 +234,164 @@ class FailureEvent:
 
 
 @dataclass(frozen=True)
+class WorldManifest:
+    """Sampled-world metadata for one falsification run."""
+
+    schema_version: str
+    world_id: str
+    slice_id: str | None
+    regulation_id: str
+    track_id: str
+    seed: int
+    priors_profile: str | None = None
+    car_family_assignments: dict[str, str] = field(default_factory=dict)
+    world_parameters: dict[str, Any] = field(default_factory=dict)
+    condition_profile: dict[str, Any] = field(default_factory=dict)
+    perception_profile: dict[str, Any] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LegalVerdict:
+    """Legal assessment attached to an action or state."""
+
+    schema_version: str
+    status: LegalStatus
+    primary_reason: str
+    rule_ids: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SafetyVerdict:
+    """Safety assessment attached to an action or state."""
+
+    schema_version: str
+    status: SafetyStatus
+    hazard_score: float
+    reaction_margin_s: float | None = None
+    delta_speed_kph: float | None = None
+    time_to_collision_s: float | None = None
+    amplifiers: list[str] = field(default_factory=list)
+    confidence: str = "low"
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EnforcementAssessment:
+    """Detectability and sanctioning assessment for a state or action."""
+
+    schema_version: str
+    detection_probability: float
+    evidence_quality: str
+    camera_visibility: float
+    telemetry_availability: float
+    decision_delay_s: float
+    penalty_consistency: float
+    appeal_risk: float
+    protest_probability: float
+    likely_outcome: str
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RegulatoryPatch:
+    """Serializable counterfactual patch description."""
+
+    schema_version: str
+    patch_id: str
+    patch_name: str
+    target_scope: str
+    regulation_override: dict[str, Any] = field(default_factory=dict)
+    enforcement_override: dict[str, Any] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class UnsafeLegalStateEvent:
+    """Causal evidence for a legal or grey-area state that is unsafe."""
+
+    schema_version: str
+    run_id: str
+    lap: int
+    segment_id: str
+    cars_involved: list[str]
+    legal_status: LegalStatus
+    safety_status: SafetyStatus
+    hazard_score: float
+    reaction_margin_s: float | None = None
+    delta_speed_kph: float | None = None
+    time_to_collision_s: float | None = None
+    regulatory_causes: list[str] = field(default_factory=list)
+    track_amplifiers: list[str] = field(default_factory=list)
+    surface_amplifiers: list[str] = field(default_factory=list)
+    condition_amplifiers: list[str] = field(default_factory=list)
+    perception_amplifiers: list[str] = field(default_factory=list)
+    pack_amplifiers: list[str] = field(default_factory=list)
+    confidence: str = "low"
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class MitigationResult:
+    """Result of replaying one regulatory or enforcement patch."""
+
+    schema_version: str
+    patch_id: str
+    patch_name: str
+    applied: bool
+    rerun_id: str | None = None
+    hazard_reduction_pct: float | None = None
+    overtake_success_change: float | None = None
+    new_failure_modes_created: list[str] = field(default_factory=list)
+    tradeoffs: dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EventEnvelope:
+    """Versioned wrapper for persisted causal events."""
+
+    schema_version: str
+    event_id: str
+    run_id: str
+    event_type: str
+    lap: int
+    segment_id: str
+    payload: dict[str, Any]
+    state_hash_before: str | None = None
+    state_hash_after: str | None = None
+    world_id: str | None = None
+    slice_id: str | None = None
+    patch_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class RaceStateSnapshot:
     """Serializable race state snapshot for replay and audit."""
 
@@ -238,6 +426,12 @@ class RunManifest:
     llm_provider: str
     llm_model: str
     prompt_template_version: str
+    world_id: str | None = None
+    slice_id: str | None = None
+    patch_id: str | None = None
+    public_anchor_score: float | None = None
+    baseline_plausibility_score: float | None = None
+    regulation_breaking_score: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -253,6 +447,80 @@ class CampaignReport:
     runs: list[dict[str, Any]]
     ranking: list[dict[str, Any]]
     summary: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+EVIDENCE_BUNDLE_REQUIRED_KEYS: tuple[str, ...] = (
+    "schema_version",
+    "run_id",
+    "slice_id",
+    "world_id",
+    "seed",
+    "config_hash",
+    "regulation_id",
+    "track",
+    "segment_focus",
+    "world_manifest",
+    "legal_verdicts",
+    "event_envelopes",
+    "unsafe_legal_states",
+    "patch_reruns",
+    "metrics",
+    "state_hashes",
+    "replay_integrity",
+)
+
+WORLD_MANIFEST_REQUIRED_KEYS: tuple[str, ...] = (
+    "world_id",
+    "seed",
+    "regulation_id",
+    "track_id",
+    "segment_focus",
+    "slice_id",
+    "config_hash",
+)
+
+STATE_HASH_REQUIRED_KEYS: tuple[str, ...] = (
+    "initial_state_hash",
+    "final_state_hash",
+    "event_log_hash",
+)
+
+REPLAY_INTEGRITY_REQUIRED_KEYS: tuple[str, ...] = (
+    "paired",
+    "state_hash_coverage",
+    "notes",
+)
+
+
+@dataclass(frozen=True)
+class EvidenceBundle:
+    """Stable top-level contract for evidence bundle exports.
+
+    Every field is guaranteed to exist in the exported bundle.  Missing
+    data is represented by empty containers or honest sentinel values,
+    never by omitting the key.
+    """
+
+    schema_version: str = EVIDENCE_BUNDLE_SCHEMA
+    run_id: str = ""
+    slice_id: str = ""
+    world_id: str = ""
+    seed: int = 0
+    config_hash: str = ""
+    regulation_id: str = ""
+    track: str = ""
+    segment_focus: str = ""
+    world_manifest: dict[str, Any] = field(default_factory=dict)
+    legal_verdicts: list[dict[str, Any]] = field(default_factory=list)
+    event_envelopes: list[dict[str, Any]] = field(default_factory=list)
+    unsafe_legal_states: list[dict[str, Any]] = field(default_factory=list)
+    patch_reruns: list[dict[str, Any]] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    state_hashes: dict[str, Any] = field(default_factory=dict)
+    replay_integrity: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
