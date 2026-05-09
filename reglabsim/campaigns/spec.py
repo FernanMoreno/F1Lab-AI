@@ -214,7 +214,10 @@ class CampaignSpec:
         return result
 
     def config_hash(self) -> str:
-        payload = json.dumps(self.to_dict(), sort_keys=True)
+        full = self.to_dict()
+        # output_root is a local filesystem concern, not causal config
+        full.pop("output_root", None)
+        payload = json.dumps(full, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod

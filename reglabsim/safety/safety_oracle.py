@@ -8,12 +8,11 @@ reaction_margin, segment risk, surface/runoff risk, and perception delay.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from reglabsim.runtime.schema import (
     LegalStatus,
-    SafetyStatus,
     LegalVerdict,
+    SafetyStatus,
     SafetyVerdict,
     UnsafeLegalStateEvent,
 )
@@ -35,7 +34,7 @@ class SafetyContext:
         closing_speed_kph: Combined closing speed of cars.
         cars_involved: List of car IDs involved in the scenario.
     """
-    
+
     legal_verdict: LegalVerdict
     delta_speed_kph: float
     reaction_margin_s: float
@@ -50,7 +49,7 @@ class SafetyContext:
 
 class SafetyOracle:
     """Evaluates safety of racing scenarios based on multiple risk factors."""
-    
+
     def evaluate_safety(self, context: SafetyContext) -> SafetyVerdict:
         """Evaluate the safety of a given context.
         
@@ -67,20 +66,20 @@ class SafetyOracle:
         energy_delta = context.energy_delta_mj
         surface_risk = context.surface_risk
         perception_delay = context.perception_delay_s
-        
+
         # Calculate hazard score based on multiple factors
         hazard_score = self._calculate_hazard_score(
-            legal_status, 
-            delta_speed, 
+            legal_status,
+            delta_speed,
             reaction_margin,
             energy_delta,
             surface_risk,
             perception_delay
         )
-        
+
         # Determine safety status based on hazard level
         safety_status = self._determine_safety_status(hazard_score, legal_status)
-        
+
         # Create safety verdict
         return SafetyVerdict(
             schema_version="safety_verdict.v1",
@@ -96,11 +95,11 @@ class SafetyOracle:
                 "perception_delay_s": perception_delay
             }
         )
-    
+
     def _calculate_hazard_score(
-        self, 
-        legal_status: LegalStatus, 
-        delta_speed_kph: float, 
+        self,
+        legal_status: LegalStatus,
+        delta_speed_kph: float,
         reaction_margin_s: float,
         energy_delta_mj: float,
         surface_risk: float,
@@ -121,7 +120,7 @@ class SafetyOracle:
         """
         # Base hazard score calculation based on multiple factors
         base_hazard = 0.1  # Base level
-        
+
         # Factor 1: Legal status risk
         if legal_status in [LegalStatus.ILLEGAL, LegalStatus.SPIRIT_VIOLATION]:
             base_hazard += 0.4  # Illegal actions have higher risk
@@ -129,7 +128,7 @@ class SafetyOracle:
             base_hazard += 0.2  # Grey area actions have medium risk
         else:
             base_hazard += 0.0  # Legal actions have no additional risk
-            
+
         # Factor 2: Delta speed risk (higher speeds = higher risk)
         if delta_speed_kph > 50:  # High speed differential
             base_hazard += 0.3
@@ -137,7 +136,7 @@ class SafetyOracle:
             base_hazard += 0.2
         else:
             base_hazard += 0.1
-            
+
         # Factor 3: Reaction margin (less time = higher risk)
         if reaction_margin_s < 0.5:
             base_hazard += 0.4
@@ -145,24 +144,24 @@ class SafetyOracle:
             base_hazard += 0.2
         elif reaction_margin_s < 2.0:
             base_hazard += 0.1
-            
+
         # Factor 4: Energy delta (higher energy = higher risk)
         if energy_delta_mj > 2.0:
             base_hazard += 0.3
         elif energy_delta_mj > 1.0:
             base_hazard += 0.15
-            
+
         # Factor 5: Surface/offline risk
         base_hazard += surface_risk * 0.2
-            
+
         # Factor 6: Perception delay risk
         base_hazard += min(perception_delay_s, 1.0) * 0.3
-            
+
         return min(1.0, base_hazard)  # Cap at 1.0
-    
+
     def _determine_safety_status(
-        self, 
-        hazard_score: float, 
+        self,
+        hazard_score: float,
         legal_status: LegalStatus
     ) -> SafetyStatus:
         """Determine safety status based on hazard score and legal status.
@@ -221,10 +220,10 @@ class SafetyOracle:
             surface_risk,
             perception_delay_s
         )
-        
+
         # Determine safety status
         safety_status = self._determine_safety_status(hazard_score, legal_verdict.status)
-        
+
         # Create the event
         return UnsafeLegalStateEvent(
             schema_version="unsafe_legal_state_event.v1",

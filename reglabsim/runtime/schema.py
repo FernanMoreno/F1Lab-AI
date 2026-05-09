@@ -34,6 +34,137 @@ class LegalStatus(StrEnum):
     SPIRIT_VIOLATION = "SPIRIT_VIOLATION"
     NEEDS_STEWARD_REVIEW = "NEEDS_STEWARD_REVIEW"
     NEEDS_TECHNICAL_DIRECTIVE = "NEEDS_TECHNICAL_DIRECTIVE"
+    UNKNOWN = "UNKNOWN"
+
+
+_LEGAL_STATUS_LOOKUP: dict[str, LegalStatus] = {s.value: s for s in LegalStatus}
+
+_LEGAL_STATUS_ALIASES: dict[str, LegalStatus] = {
+    "GREY_AREA": LegalStatus.GREY_AREA,
+    "SPIRIT_VIOLATION": LegalStatus.SPIRIT_VIOLATION,
+    "NEEDS_STEWARD_REVIEW": LegalStatus.NEEDS_STEWARD_REVIEW,
+    "NEEDS_TECHNICAL_DIRECTIVE": LegalStatus.NEEDS_TECHNICAL_DIRECTIVE,
+    "STEWARD_REVIEW": LegalStatus.NEEDS_STEWARD_REVIEW,
+    "TECHNICAL_DIRECTIVE": LegalStatus.NEEDS_TECHNICAL_DIRECTIVE,
+}
+
+
+def _slugify_legal_status(raw: str) -> str:
+    collapsed = raw.strip().lower().replace(" ", "_").replace("-", "_")
+    while "__" in collapsed:
+        collapsed = collapsed.replace("__", "_")
+    return collapsed.strip("_").upper()
+
+
+def normalize_legal_status_string(raw: str) -> LegalStatus:
+    """Normalize an arbitrary legal-status string to the closed ``LegalStatus`` set.
+
+    Handles canonical values, common separators (spaces, hyphens, underscores),
+    and legacy aliases (e.g. ``"steward_review"`` → ``NEEDS_STEWARD_REVIEW``).
+    Unknown strings map to ``LegalStatus.UNKNOWN``.
+    """
+    slug = _slugify_legal_status(raw)
+    if slug in _LEGAL_STATUS_LOOKUP:
+        return _LEGAL_STATUS_LOOKUP[slug]
+    if slug in _LEGAL_STATUS_ALIASES:
+        return _LEGAL_STATUS_ALIASES[slug]
+    return LegalStatus.UNKNOWN
+
+
+def legal_verdict_to_dict(verdict: Any) -> dict[str, Any]:
+    """Convert any legal verdict representation to the canonical export dict.
+
+    Accepts:
+    - ``LegalVerdict`` dataclass instances
+    - dicts produced by ``ActionValidator.classify_legality()`` or
+      ``ActionValidator.validate()`` (which nest under ``legal_verdict``)
+    - raw strings (legacy path)
+    - dicts with a ``legal_verdict`` nested key (validation-log entries)
+
+    Returns a dict with the canonical keys:
+    ``status``, ``rule_refs``, ``reason_codes``, ``grey_area_flags``,
+    ``spirit_violation_score``, ``steward_review_required``.
+    """
+    if isinstance(verdict, LegalVerdict):
+        return {
+            "status": verdict.status.value,
+            "rule_refs": list(verdict.rule_ids),
+            "reason_codes": [verdict.primary_reason] if verdict.primary_reason else [],
+            "grey_area_flags": list(verdict.notes),
+            "spirit_violation_score": verdict.evidence.get("spirit_violation_score", 0.0),
+            "steward_review_required": verdict.evidence.get("steward_review_required", False),
+        }
+
+    if isinstance(verdict, str):
+        status = normalize_legal_status_string(verdict)
+        reason: list[str] = (
+            ["unknown_legacy_legal_status"] if status == LegalStatus.UNKNOWN
+            else ["legacy_string_verdict"]
+        )
+        return {
+            "status": status.value,
+            "rule_refs": [],
+            "reason_codes": reason,
+            "grey_area_flags": [],
+            "spirit_violation_score": 0.0,
+            "steward_review_required": False,
+        }
+
+    if isinstance(verdict, dict):
+        inner = verdict.get("legal_verdict")
+        if isinstance(inner, dict):
+            return _normalize_verdict_dict(inner)
+        return _normalize_verdict_dict(verdict)
+
+    return {
+        "status": LegalStatus.UNKNOWN.value,
+        "rule_refs": [],
+        "reason_codes": ["unrecognized_verdict_type"],
+        "grey_area_flags": [],
+        "spirit_violation_score": 0.0,
+        "steward_review_required": False,
+    }
+
+
+def _normalize_verdict_dict(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a verdict dict (from classify_legality or validate) to canonical shape."""
+    raw_status = d.get("status", d.get("validated_status", "LEGAL"))
+    status = normalize_legal_status_string(str(raw_status))
+    rule_refs = d.get("rule_refs", d.get("rule_ids", []))
+    if isinstance(rule_refs, (list, tuple)):
+        rule_refs = [str(r) for r in rule_refs]
+    else:
+        rule_refs = []
+    reason_codes = d.get("reason_codes", [])
+    if isinstance(reason_codes, (list, tuple)):
+        reason_codes = [str(r) for r in reason_codes]
+    else:
+        reason_codes = []
+    if (
+        status == LegalStatus.UNKNOWN
+        and raw_status
+        and str(raw_status).strip().upper() not in _LEGAL_STATUS_LOOKUP
+    ):
+        reason_codes = list(dict.fromkeys([*reason_codes, "unknown_legacy_legal_status"]))
+    grey_area_flags = d.get("grey_area_flags", [])
+    if isinstance(grey_area_flags, (list, tuple)):
+        grey_area_flags = [str(f) for f in grey_area_flags]
+    else:
+        grey_area_flags = []
+    spirit_score = d.get("spirit_violation_score", 0.0)
+    if not isinstance(spirit_score, (int, float)):
+        spirit_score = 0.0
+    steward = d.get("steward_review_required", d.get("steward_review_recommended", False))
+    if not isinstance(steward, bool):
+        steward = bool(steward)
+    return {
+        "status": status.value,
+        "rule_refs": list(rule_refs),
+        "reason_codes": list(reason_codes),
+        "grey_area_flags": list(grey_area_flags),
+        "spirit_violation_score": float(spirit_score),
+        "steward_review_required": steward,
+    }
 
 
 class SafetyStatus(StrEnum):
@@ -476,6 +607,7 @@ WORLD_MANIFEST_REQUIRED_KEYS: tuple[str, ...] = (
     "world_id",
     "seed",
     "regulation_id",
+    "track",
     "track_id",
     "segment_focus",
     "slice_id",

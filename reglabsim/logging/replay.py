@@ -8,13 +8,43 @@ from pathlib import Path
 from typing import Any
 
 from reglabsim.runtime.schema import (
-    EVIDENCE_BUNDLE_REQUIRED_KEYS,
     EVENT_ENVELOPE_SCHEMA,
-    STATE_HASH_REQUIRED_KEYS,
-    WORLD_MANIFEST_REQUIRED_KEYS,
     WORLD_MANIFEST_SCHEMA,
     EvidenceBundle,
+    legal_verdict_to_dict,
 )
+
+_NONDETERMINISTIC_FIELDS: frozenset[str] = frozenset({
+    "run_id",
+    "event_id",
+    "timestamp",
+    "timestamp_sim",
+    "created_at",
+    "wall_time",
+    "output_path",
+    "bundle_path",
+    "public_anchor_score",
+    "baseline_plausibility_score",
+    "regulation_breaking_score",
+})
+
+
+def _strip_nondeterministic_fields(payload: Any) -> Any:
+    """Recursively remove non-deterministic fields from *payload* for hashing.
+
+    Only affects dicts — lists and scalars are returned as-is.  The original
+    object is never mutated; a deep copy is made when a dict is encountered.
+    """
+    if isinstance(payload, dict):
+        cleaned: dict[str, Any] = {}
+        for key, value in payload.items():
+            if key in _NONDETERMINISTIC_FIELDS:
+                continue
+            cleaned[key] = _strip_nondeterministic_fields(value)
+        return cleaned
+    if isinstance(payload, list):
+        return [_strip_nondeterministic_fields(item) for item in payload]
+    return payload
 
 
 class ReplayEngine:
@@ -138,20 +168,22 @@ class ReplayEngine:
         return Path("outputs") / "evidence_bundles" / run_id / "evidence_bundle.json"
 
     def _build_world_manifest(self, run_output: dict[str, Any]) -> dict[str, Any]:
+        manifest = dict(run_output.get("manifest", {}))
+        spec = run_output.get("spec", {})
+        falsification = spec.get("falsification", {}) if isinstance(spec, dict) else {}
         existing = run_output.get("world_manifest")
         if isinstance(existing, dict) and existing:
             base = dict(existing)
         else:
-            manifest = dict(run_output.get("manifest", {}))
-            spec = run_output.get("spec", {})
-            falsification = spec.get("falsification", {}) if isinstance(spec, dict) else {}
             conditions = run_output.get("conditions", {})
+            track_value = manifest.get("track_id", "unknown_track")
             base = {
                 "schema_version": WORLD_MANIFEST_SCHEMA,
                 "world_id": manifest.get("world_id") or manifest.get("run_id") or "unknown_world",
                 "slice_id": manifest.get("slice_id") or falsification.get("slice_id"),
                 "regulation_id": manifest.get("regulation_id", "unknown_regulation"),
-                "track_id": manifest.get("track_id", "unknown_track"),
+                "track": track_value,
+                "track_id": track_value,
                 "seed": int(manifest.get("seed", 0)),
                 "priors_profile": falsification.get("priors_profile"),
                 "car_family_assignments": self._collect_car_family_assignments(run_output),
@@ -160,20 +192,17 @@ class ReplayEngine:
                 "perception_profile": falsification.get("perception_profile", {}),
                 "notes": falsification.get("notes", []),
             }
-        manifest = dict(run_output.get("manifest", {}))
-        spec = run_output.get("spec", {})
-        falsification = spec.get("falsification", {}) if isinstance(spec, dict) else {}
         base.setdefault("world_id", manifest.get("world_id", ""))
         base.setdefault("seed", int(manifest.get("seed", 0)))
         base.setdefault("regulation_id", manifest.get("regulation_id", ""))
-        base.setdefault("track_id", manifest.get("track_id", ""))
+        track_val = manifest.get("track_id", "")
+        base.setdefault("track", track_val)
+        base.setdefault("track_id", track_val)
         base.setdefault("segment_focus", self._resolve_segment_focus(run_output))
         base.setdefault("slice_id", manifest.get("slice_id") or falsification.get("slice_id", ""))
         base.setdefault("config_hash", manifest.get("config_hash", ""))
         if "sim_profile" not in base:
-            base["sim_profile"] = getattr(
-                type("Spec", (), {"sim_profile": "public_baseline"})(), "sim_profile"
-            )
+            base["sim_profile"] = type("Spec", (), {"sim_profile": "public_baseline"})().sim_profile
             if isinstance(spec, dict):
                 base["sim_profile"] = spec.get("sim_profile", "public_baseline")
         if "patch_id" not in base:
@@ -229,6 +258,8 @@ class ReplayEngine:
         for index, event in enumerate(run_output.get("event_log", [])):
             event_payload = event if isinstance(event, dict) else {"raw_event": event}
             event_type = str(event_payload.get("event_type", "unknown"))
+            payload_copy = dict(event_payload)
+            self._normalize_legal_status_in_payload(payload_copy)
             envelopes.append(
                 {
                     "schema_version": EVENT_ENVELOPE_SCHEMA,
@@ -237,7 +268,7 @@ class ReplayEngine:
                     "event_type": event_type,
                     "lap": int(event_payload.get("lap", 0)),
                     "segment_id": str(event_payload.get("segment_id", "unknown")),
-                    "payload": event_payload,
+                    "payload": payload_copy,
                     "state_hash_before": None,
                     "state_hash_after": None,
                     "world_id": world_id,
@@ -247,38 +278,61 @@ class ReplayEngine:
             )
         return envelopes
 
+    @staticmethod
+    def _normalize_legal_status_in_payload(payload: dict[str, Any]) -> None:
+        """Add a structured ``legal_verdict`` dict alongside any ``legal_status`` string.
+
+        This mutates *payload* in place, adding ``legal_verdict`` as a
+        canonical dict while preserving the legacy ``legal_status`` scalar.
+        When both exist, their statuses are guaranteed to match because
+        the normalization helper reads the same string.
+        """
+        legal_status_keys = (
+            "legal_status",
+            "attacker_legal_status",
+            "defender_legal_status",
+            "battle_legal_status",
+        )
+        for key in legal_status_keys:
+            raw = payload.get(key)
+            if isinstance(raw, str):
+                payload[f"{key}_verdict"] = legal_verdict_to_dict(raw)
+
     def _build_state_hashes(self, run_output: dict[str, Any]) -> dict[str, Any]:
         """Build deterministic partial state hashes from manifest and event data."""
         manifest = dict(run_output.get("manifest", {}))
         event_log = run_output.get("event_log", [])
-        
+
         initial_state_hash = ""
         final_state_hash = ""
         event_log_hash = ""
-        
-        # Hash manifest (contains world_id, seed, regulation_id, etc.)
-        manifest_str = json.dumps(manifest, sort_keys=True, ensure_ascii=True)
+
+        # Create deterministic manifest by removing non-deterministic fields
+        deterministic_manifest = _strip_nondeterministic_fields(manifest)
+
+        # Hash deterministic manifest (contains world_id, seed, regulation_id, etc.)
+        manifest_str = json.dumps(deterministic_manifest, sort_keys=True, ensure_ascii=True)
         initial_state_hash = hashlib.sha256(manifest_str.encode("utf-8")).hexdigest()[:16]
-        
-        # Hash final state from last snapshot
+
+        # Hash final state from last snapshot (also normalized)
         state_snapshots = run_output.get("state_snapshots", [])
         if state_snapshots:
-            final_snapshot = state_snapshots[-1]
+            final_snapshot = _strip_nondeterministic_fields(state_snapshots[-1])
             final_str = json.dumps(final_snapshot, sort_keys=True, ensure_ascii=True)
             final_state_hash = hashlib.sha256(final_str.encode("utf-8")).hexdigest()[:16]
         else:
-            # Fallback: hash manifest + final event
+            # Fallback: hash deterministic manifest + last event (normalized)
+            last_event = _strip_nondeterministic_fields(event_log[-1]) if event_log else {}
             fallback_str = manifest_str + json.dumps(
-                event_log[-1] if event_log else {}, 
-                sort_keys=True, 
-                ensure_ascii=True
+                last_event, sort_keys=True, ensure_ascii=True
             )
             final_state_hash = hashlib.sha256(fallback_str.encode("utf-8")).hexdigest()[:16]
-        
-        # Hash event log
-        event_str = json.dumps(event_log, sort_keys=True, ensure_ascii=True)
+
+        # Hash event log with non-deterministic fields stripped
+        normalized_events = _strip_nondeterministic_fields(event_log)
+        event_str = json.dumps(normalized_events, sort_keys=True, ensure_ascii=True)
         event_log_hash = hashlib.sha256(event_str.encode("utf-8")).hexdigest()[:16]
-        
+
         return {
             "initial_state_hash": initial_state_hash,
             "final_state_hash": final_state_hash,
@@ -302,30 +356,33 @@ class ReplayEngine:
         ]
 
     def _extract_legal_verdicts(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
-        """Extract legal verdicts from validation log."""
+        """Extract and normalize legal verdicts from validation log."""
         validation_log = run_output.get("action_validation_log", [])
         verdicts = []
         for entry in validation_log:
             if isinstance(entry, dict) and "legal_verdict" in entry:
-                verdicts.append(entry["legal_verdict"])
-        # Also check steward log for legal assessments
+                verdicts.append(legal_verdict_to_dict(entry))
         steward_log = run_output.get("steward_log", [])
         for entry in steward_log:
             if isinstance(entry, dict) and "legal_verdict" in entry:
-                verdicts.append(entry["legal_verdict"])
+                verdicts.append(legal_verdict_to_dict(entry))
         return verdicts
 
     def _extract_patch_reruns(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract patch rerun metadata."""
-        patch_reruns = run_output.get("patch_reruns", [])
-        if isinstance(patch_reruns, list):
-            return patch_reruns
-        
-        # Check counterfactuals if present
-        counterfactuals = run_output.get("counterfactuals", [])
-        if isinstance(counterfactuals, list):
-            patch_reruns.extend(counterfactuals)
-        
+        patch_reruns_raw = run_output.get("patch_reruns", [])
+        patch_reruns: list[dict[str, Any]] = (
+            [item for item in patch_reruns_raw if isinstance(item, dict)]
+            if isinstance(patch_reruns_raw, list)
+            else []
+        )
+
+        counterfactuals_raw = run_output.get("counterfactuals", [])
+        if isinstance(counterfactuals_raw, list):
+            patch_reruns.extend(
+                item for item in counterfactuals_raw if isinstance(item, dict)
+            )
+
         return patch_reruns
 
     def _resolve_segment_focus(self, run_output: dict[str, Any]) -> str:
@@ -333,15 +390,15 @@ class ReplayEngine:
         manifest = dict(run_output.get("manifest", {}))
         spec = run_output.get("spec", {})
         falsification = spec.get("falsification", {}) if isinstance(spec, dict) else {}
-        
+
         segment_focus = manifest.get("segment_focus")
         if segment_focus is not None:
             return str(segment_focus)
-        
+
         segment_focus = falsification.get("segment_focus")
         if segment_focus is not None:
             if isinstance(segment_focus, list) and segment_focus:
                 return str(segment_focus[0])
             return str(segment_focus)
-        
+
         return "unknown_segment"
