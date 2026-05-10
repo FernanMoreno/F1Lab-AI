@@ -59,6 +59,9 @@ agents = [
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
 ]
+nvidia = [
+    "langchain-nvidia-ai-endpoints>=1.0.0",
+]
 optimization = [
     "optuna>=3.6",
     "pymoo>=0.6",
@@ -120,6 +123,9 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests that require configs or end-to-end simulation setup",
+]
 
 [tool.coverage.run]
 source = ["reglabsim"]
@@ -175,4 +181,8 @@ show_error_context = true
 
 [[tool.mypy.overrides]]
 module = ["fastf1"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["langchain_nvidia_ai_endpoints"]
 ignore_missing_imports = true
