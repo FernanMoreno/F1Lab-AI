@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from reglabsim.campaigns.runner import CampaignRunner, compare_patch_metrics
+from reglabsim.campaigns.runner import CampaignRunner, compare_patch_metrics, rank_patch_results
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.conditions.repository import ConditionProfileRepository
 from reglabsim.conditions.scenarios import (
@@ -29,6 +29,7 @@ from reglabsim.data import (
 )
 from reglabsim.failures.classifier import FailureClassifier
 from reglabsim.failures.taxonomy import summarize_failures
+from reglabsim.logging.audit_report import build_audit_report, render_audit_report_markdown
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.metrics.registry import MetricRegistryImpl
 from reglabsim.regulation.base import Regulation
@@ -664,7 +665,7 @@ class SimulationFacadeImpl:
 
     def _is_street_track(self, track: Any) -> bool:
         family = str(track.metadata.get("track_family", "")).lower()
-        return "street" in family or track.track_id in {"baku", "monaco", "singapore"}
+        return "street" in family or bool(track.metadata.get("is_street_circuit", False))
 
     def calibrate_public_lap(
         self,
@@ -1091,9 +1092,15 @@ class SimulationFacadeImpl:
         baseline_metrics: dict[str, Any] = {
             k: baseline_bundle["metrics"].get(k) for k in _metric_keys
         }
+        baseline_metrics["unsafe_legal_event_refs"] = baseline_bundle["metrics"].get(
+            "unsafe_legal_event_refs", []
+        )
         patched_metrics: dict[str, Any] = {
             k: patched_bundle["metrics"].get(k) for k in _metric_keys
         }
+        patched_metrics["unsafe_legal_event_refs"] = patched_bundle["metrics"].get(
+            "unsafe_legal_event_refs", []
+        )
         delta = compare_patch_metrics(baseline_metrics, patched_metrics)
 
         patch_id = str(resolved_patch.get("name", resolved_patch.get("patch_id", "custom_patch")))
@@ -1108,6 +1115,7 @@ class SimulationFacadeImpl:
         baseline_seed = baseline["manifest"].get("seed")
         patched_seed = patch_result["rerun"]["manifest"].get("seed")
         same_seed = baseline_seed == patched_seed
+        patched_config_hash = patch_result["rerun"]["manifest"].get("config_hash")
 
         notes: list[str] = []
         if not same_seed:
@@ -1131,6 +1139,9 @@ class SimulationFacadeImpl:
             "delta_metrics": delta,
             "verdict": delta["verdict"],
             "notes": notes,
+            "patched_seed": patched_seed,
+            "patched_world_id": patched_world_id,
+            "patched_config_hash": patched_config_hash,
         }
 
         enriched_baseline = {**baseline, "patch_reruns": [patch_rerun_entry]}
@@ -1145,6 +1156,66 @@ class SimulationFacadeImpl:
             "baseline_bundle": baseline_bundle,
             "patched_bundle": patched_bundle,
             "evidence_bundle": evidence_bundle,
+        }
+
+    def compare_patch_catalog(
+        self,
+        config_path: str | Path,
+        patch_ids: list[str],
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        """Run baseline + patched reruns for each patch_id, then rank results.
+
+        Returns:
+            mode, baseline_run, baseline_bundle, patch_results, ranking
+        """
+        runner = self._campaign_runner()
+        _metric_keys = ("unsafe_legal_state_count", "max_hazard_score", "mean_hazard_score")
+
+        baseline = self.run_falsification_slice(config_path, seed=seed)
+        baseline_bundle = self._replay.build_evidence_bundle(baseline)
+        baseline_metrics: dict[str, Any] = {
+            k: baseline_bundle["metrics"].get(k) for k in _metric_keys
+        }
+
+        patch_results: list[dict[str, Any]] = []
+        ranking_inputs: list[dict[str, Any]] = []
+
+        for patch_id in patch_ids:
+            resolved = runner._resolve_patch_candidate(patch_id)
+            patch_eval = self.evaluate_patch(baseline, patch=resolved)
+            patched_run = patch_eval["rerun"]
+            patched_bundle = self._replay.build_evidence_bundle(patched_run)
+            patched_metrics: dict[str, Any] = {
+                k: patched_bundle["metrics"].get(k) for k in _metric_keys
+            }
+            delta = compare_patch_metrics(baseline_metrics, patched_metrics)
+
+            patch_results.append({
+                "patch_id": patch_id,
+                "patch_type": str(resolved.get("patch_type", patch_id)),
+                "patch_rerun": patched_run,
+                "patched_bundle": patched_bundle,
+            })
+            ranking_inputs.append({
+                "patch_id": patch_id,
+                "patch_type": str(resolved.get("patch_type", patch_id)),
+                "verdict": delta["verdict"],
+                "mitigation_success": delta["mitigation_success"],
+                "hazard_reduced": delta["hazard_reduced"],
+                "unsafe_legal_state_count_delta": delta.get("unsafe_legal_state_count_delta"),
+                "max_hazard_score_delta": delta.get("max_hazard_score_delta"),
+                "mean_hazard_score_delta": delta.get("mean_hazard_score_delta"),
+            })
+
+        ranking = rank_patch_results(ranking_inputs)
+
+        return {
+            "mode": "patch_catalog_comparison",
+            "baseline_run": baseline,
+            "baseline_bundle": baseline_bundle,
+            "patch_results": patch_results,
+            "ranking": ranking,
         }
 
     def evaluate_patch(
@@ -1220,6 +1291,60 @@ class SimulationFacadeImpl:
                 key for key in bundle_dict.keys() if key != "summary_markdown"
             ],
         }
+
+    def export_audit_report(
+        self,
+        bundle_or_path: dict[str, Any] | str | Path,
+        output_path: str | Path | None = None,
+        markdown: bool = True,
+    ) -> dict[str, Any]:
+        """Build and optionally persist a deterministic audit report from an EvidenceBundle.
+
+        Args:
+            bundle_or_path: EvidenceBundle dict or path to evidence_bundle.json.
+            output_path: If given, write audit_report.json (and audit_report.md) here.
+            markdown: When output_path is set, also write a Markdown report.
+
+        Returns:
+            {"report": {...}, "report_path": str | None, "markdown_path": str | None}
+        """
+        bundle = self._coerce_bundle(bundle_or_path)
+        report = build_audit_report(bundle)
+        report_path: str | None = None
+        markdown_path: str | None = None
+
+        if output_path is not None:
+            out = Path(output_path)
+            if out.suffix:
+                json_path = out
+            else:
+                out.mkdir(parents=True, exist_ok=True)
+                json_path = out / "audit_report.json"
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.write_text(
+                json.dumps(report, indent=2, ensure_ascii=True), encoding="utf-8"
+            )
+            report_path = str(json_path)
+
+            if markdown:
+                md_text = render_audit_report_markdown(report)
+                md_path = json_path.with_suffix(".md")
+                md_path.write_text(md_text, encoding="utf-8")
+                markdown_path = str(md_path)
+
+        return {
+            "report": report,
+            "report_path": report_path,
+            "markdown_path": markdown_path,
+        }
+
+    def _coerce_bundle(
+        self, bundle_or_path: dict[str, Any] | str | Path
+    ) -> dict[str, Any]:
+        if isinstance(bundle_or_path, dict):
+            return bundle_or_path
+        raw: dict[str, Any] = json.loads(Path(bundle_or_path).read_text(encoding="utf-8"))
+        return raw
 
     def compare_regulations(
         self,

@@ -34,6 +34,30 @@ from reglabsim.runtime.schema import CampaignReport, CarRuntimeState, RunManifes
 from reglabsim.steward.engine import StewardEngine
 from reglabsim.track.track_loader import TrackRepository
 
+_VERDICT_RANK: dict[str, int] = {
+    "mitigated": 0,
+    "improved": 1,
+    "improved_hazard": 2,
+    "unchanged": 3,
+    "worse": 4,
+}
+
+
+def rank_patch_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort patch result summaries by mitigation effectiveness.
+
+    Each item needs: patch_id, verdict, and optionally delta fields.
+    """
+
+    def _key(item: dict[str, Any]) -> tuple[int, float, float, float]:
+        v = _VERDICT_RANK.get(str(item.get("verdict", "unchanged")), 3)
+        count_d = float(item.get("unsafe_legal_state_count_delta") or 0)
+        max_d = float(item.get("max_hazard_score_delta") or 0)
+        mean_d = float(item.get("mean_hazard_score_delta") or 0)
+        return (v, count_d, max_d, mean_d)
+
+    return sorted(results, key=_key)
+
 
 def compare_patch_metrics(
     baseline_metrics: dict[str, Any],
@@ -42,12 +66,14 @@ def compare_patch_metrics(
     """Compute delta between baseline and patched unsafe-legal metrics.
 
     verdict values:
-      "mitigated"  — baseline_count > 0 and patched_count == 0
-      "improved"   — patched_count < baseline_count but patched_count > 0
-      "unchanged"  — patched_count == baseline_count
-      "worse"      — patched_count > baseline_count
+      "mitigated"       — baseline_count > 0 and patched_count == 0 (full elimination)
+      "improved"        — patched_count < baseline_count but patched_count > 0
+      "improved_hazard" — count equal but max_hazard or mean_hazard decreased
+      "unchanged"       — count equal and no hazard change
+      "worse"           — patched_count > baseline_count, or count equal with hazard increase
 
-    mitigation_success is True only when verdict == "mitigated" (full elimination).
+    mitigation_success is True only when verdict == "mitigated".
+    hazard_reduced is True when any hazard score delta is negative.
     """
 
     def _delta(key: str) -> float | None:
@@ -60,21 +86,40 @@ def compare_patch_metrics(
     baseline_count = int(baseline_metrics.get("unsafe_legal_state_count", 0))
     patched_count = int(patched_metrics.get("unsafe_legal_state_count", 0))
 
+    max_hazard_delta = _delta("max_hazard_score")
+    mean_hazard_delta = _delta("mean_hazard_score")
+
+    any_negative = (
+        (isinstance(max_hazard_delta, float) and max_hazard_delta < 0)
+        or (isinstance(mean_hazard_delta, float) and mean_hazard_delta < 0)
+    )
+    any_positive = (
+        (isinstance(max_hazard_delta, float) and max_hazard_delta > 0)
+        or (isinstance(mean_hazard_delta, float) and mean_hazard_delta > 0)
+    )
+    hazard_reduced = any_negative
+    hazard_increased = any_positive and not any_negative
+
     if baseline_count > 0 and patched_count == 0:
         verdict = "mitigated"
     elif patched_count < baseline_count:
         verdict = "improved"
-    elif patched_count == baseline_count:
-        verdict = "unchanged"
-    else:
+    elif patched_count > baseline_count:
         verdict = "worse"
+    elif hazard_reduced:
+        verdict = "improved_hazard"
+    elif hazard_increased:
+        verdict = "worse"
+    else:
+        verdict = "unchanged"
 
     return {
         "unsafe_legal_state_count_delta": patched_count - baseline_count,
-        "max_hazard_score_delta": _delta("max_hazard_score"),
-        "mean_hazard_score_delta": _delta("mean_hazard_score"),
+        "max_hazard_score_delta": max_hazard_delta,
+        "mean_hazard_score_delta": mean_hazard_delta,
         "verdict": verdict,
         "mitigation_success": verdict == "mitigated",
+        "hazard_reduced": hazard_reduced,
     }
 
 
@@ -692,6 +737,104 @@ class CampaignRunner:
                 "expected_tradeoffs": [
                     "lower effective hazard score",
                     "fewer unsafe_legal_state emissions",
+                ],
+            },
+            "closing_speed_cap_v2": {
+                "name": "closing_speed_cap_v2",
+                "patch_type": "closing_speed_cap",
+                "description": (
+                    "Stricter closing speed cap than v1. "
+                    "Reduces effective_delta_kph to 55 kph before SafetyOracle evaluation."
+                ),
+                "failure_targets": ["unsafe_closing_speed", "unsafe_legal_state"],
+                "regulation_overrides": {"safety": {"closing_speed_cap_kph": 55.0}},
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "more aggressive hazard reduction than v1",
+                    "may suppress borderline legitimate attacks",
+                ],
+            },
+            "minimum_reaction_margin_v1": {
+                "name": "minimum_reaction_margin_v1",
+                "patch_type": "minimum_reaction_margin",
+                "description": (
+                    "Require minimum reaction margin before unsafe legal candidate can remain "
+                    "allowed. Reduces effective delta by 15% if reaction margin is below threshold."
+                ),
+                "failure_targets": ["unsafe_legal_state", "unsafe_closing_speed"],
+                "regulation_overrides": {"safety": {"minimum_reaction_margin_s": 0.75}},
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "penalises low-TTC battles in confined segments",
+                    "no effect when reaction margin is adequate",
+                ],
+            },
+            "confined_corner_attack_restriction_v1": {
+                "name": "confined_corner_attack_restriction_v1",
+                "patch_type": "confined_corner_attack_restriction",
+                "description": (
+                    "Reduce effective closing speed in confined corners with risky runoff. "
+                    "Applies 25% reduction when segment is narrow, corner-type, and runoff "
+                    "is hazardous."
+                ),
+                "failure_targets": ["unsafe_legal_state", "unsafe_closing_speed"],
+                "regulation_overrides": {
+                    "safety": {
+                        "confined_corner_attack_restriction": True,
+                        "confined_corner_width_m": 12.5,
+                        "confined_corner_runoff_types": [
+                            "grass",
+                            "gravel",
+                            "wall",
+                            "barrier",
+                            "concrete",
+                        ],
+                    }
+                },
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "segment-generic — no track name dependency",
+                    "may suppress some legitimate attacks in narrow corners",
+                ],
+            },
+            "active_aero_delay_high_risk_v1": {
+                "name": "active_aero_delay_high_risk_v1",
+                "patch_type": "active_aero_delay_high_risk",
+                "description": (
+                    "Reduce grey-zone exploitation from active aero in high-risk segments. "
+                    "Applies 15% reduction when active aero or high geometry risk is detected."
+                ),
+                "failure_targets": ["unsafe_legal_state", "grey_area_exploit"],
+                "regulation_overrides": {
+                    "safety": {
+                        "active_aero_delay_high_risk": True,
+                        "active_aero_delay_risk_threshold": 0.65,
+                    }
+                },
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "property-driven — triggers on geometry_risk not track_id",
+                    "may reduce legitimate active aero attacks at high-risk segments",
+                ],
+            },
+            "pack_compression_overtake_limit_v1": {
+                "name": "pack_compression_overtake_limit_v1",
+                "patch_type": "pack_compression_overtake_limit",
+                "description": (
+                    "Reduce unsafe attack when pack compression is high. "
+                    "Applies 20% reduction when pack_compression_ratio exceeds threshold."
+                ),
+                "failure_targets": ["unsafe_legal_state", "unsafe_closing_speed"],
+                "regulation_overrides": {
+                    "safety": {
+                        "pack_compression_overtake_limit": True,
+                        "pack_compression_threshold": 0.35,
+                    }
+                },
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "penalises attacks in compressed packs",
+                    "no effect in low-compression battles",
                 ],
             },
         }

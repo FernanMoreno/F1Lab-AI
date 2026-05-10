@@ -518,3 +518,52 @@ def test_compare_patch_metrics_worse_when_count_increases() -> None:
     assert result["verdict"] == "worse"
     assert result["mitigation_success"] is False
     assert result["unsafe_legal_state_count_delta"] == 1
+
+
+def test_compare_patch_metrics_improved_hazard_when_count_same_but_hazard_lower() -> None:
+    """count equal but max_hazard drops → improved_hazard, not unchanged."""
+    result = compare_patch_metrics(
+        {"unsafe_legal_state_count": 9, "max_hazard_score": 0.898, "mean_hazard_score": 0.887},
+        {"unsafe_legal_state_count": 9, "max_hazard_score": 0.710, "mean_hazard_score": 0.700},
+    )
+    assert result["verdict"] == "improved_hazard"
+    assert result["mitigation_success"] is False
+    assert result["hazard_reduced"] is True
+    assert result["unsafe_legal_state_count_delta"] == 0
+    assert result["max_hazard_score_delta"] < 0
+    assert result["mean_hazard_score_delta"] < 0
+
+
+def test_compare_patch_metrics_worse_when_count_same_but_hazard_higher() -> None:
+    """count equal but hazard increases → worse."""
+    result = compare_patch_metrics(
+        {"unsafe_legal_state_count": 3, "max_hazard_score": 0.5, "mean_hazard_score": 0.45},
+        {"unsafe_legal_state_count": 3, "max_hazard_score": 0.7, "mean_hazard_score": 0.65},
+    )
+    assert result["verdict"] == "worse"
+    assert result["mitigation_success"] is False
+    assert result["hazard_reduced"] is False
+    assert result["unsafe_legal_state_count_delta"] == 0
+    assert result["max_hazard_score_delta"] > 0
+
+
+def test_compare_patch_metrics_unchanged_when_count_same_no_hazard_data() -> None:
+    """count equal, both hazard scores None → unchanged (no hazard signal)."""
+    result = compare_patch_metrics(
+        {"unsafe_legal_state_count": 0, "max_hazard_score": None, "mean_hazard_score": None},
+        {"unsafe_legal_state_count": 0, "max_hazard_score": None, "mean_hazard_score": None},
+    )
+    assert result["verdict"] == "unchanged"
+    assert result["hazard_reduced"] is False
+
+
+def test_compare_patch_metrics_hazard_reduced_field_present_always() -> None:
+    """hazard_reduced must be present in all delta outputs."""
+    for bm, pm in [
+        ({"unsafe_legal_state_count": 1, "max_hazard_score": 0.8, "mean_hazard_score": 0.7},
+         {"unsafe_legal_state_count": 0, "max_hazard_score": None, "mean_hazard_score": None}),
+        ({"unsafe_legal_state_count": 2, "max_hazard_score": 0.6, "mean_hazard_score": 0.5},
+         {"unsafe_legal_state_count": 1, "max_hazard_score": 0.4, "mean_hazard_score": 0.3}),
+    ]:
+        result = compare_patch_metrics(bm, pm)
+        assert "hazard_reduced" in result

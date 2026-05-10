@@ -198,7 +198,7 @@ def test_microkernel_emits_unsafe_legal_companion_event_for_spoon_style_battle()
     assert unsafe_legal_events
     assert unsafe_legal_events[0].details["safety_status"] == "UNSAFE_LEGAL"
     assert unsafe_legal_events[0].details["legal_status"] in {"LEGAL", "GREY_AREA"}
-    assert unsafe_legal_events[0].details["slice_hint"] == "suzuka_spoon_style"
+    assert unsafe_legal_events[0].details["slice_hint"] == "confined_corner_unsafe_legal"
     assert unsafe_legal_events[0].details["companion_event_type"] == "overtake"
     assert unsafe_legal_events[0].details["non_contact"] is True
 
@@ -661,3 +661,125 @@ def test_evidence_bundle_contains_safety_verdict_for_unsafe_legal_states() -> No
     assert sv["status"] in {"UNSAFE_LEGAL", "CRITICAL"}
     assert details["safety_status"] == sv["status"]
     assert details["hazard_score"] == sv["hazard_score"]
+
+
+def test_unsafe_legal_state_is_track_property_driven_not_suzuka_specific() -> None:
+    """Generality: unsafe_legal_state emits for any track with dangerous segment geometry.
+
+    Uses a synthetic circuit with no relation to Suzuka/Spoon — same dangerous
+    properties (narrow corner, grass runoff, high side-by-side risk) must trigger
+    the same outcome purely from segment features, never from track identity.
+    """
+    microkernel = RaceMicrokernel(
+        regulation={"power_unit": {"ers_max_energy_mj": 6.0, "ers_deployment_max_kw": 250.0}},
+        seed=42,
+    )
+    track = TrackModel(
+        track_id="synthetic_test_circuit",
+        name="Synthetic Test Circuit",
+        country="Testland",
+        length_m=1000.0,
+        turns=1,
+        laps=5,
+        race_distance_m=5000.0,
+        avg_speed_kph=175.0,
+        fidelity_level=2,
+        segments=[
+            TrackSegment(
+                segment_id="tight_corner_sector_1",
+                name="Tight Corner Sector 1",
+                segment_type="corner",
+                start_m=0.0,
+                end_m=1000.0,
+                width_m=11.0,
+                radius_m=140.0,
+                overtaking_viability="high",
+                preferred_battle_zone=True,
+                runoff=RunoffProfile(
+                    type="grass",
+                    width_m=2.5,
+                    grip_dry=0.30,
+                    grip_wet=0.12,
+                    rejoin_risk="high",
+                ),
+                risk=SegmentRiskProfile(
+                    unsafe_closing_speed_threshold_kph=36.0,
+                    side_by_side_risk="high",
+                    evasive_action_margin="high",
+                    energy_delta_sensitivity="high",
+                    barrier_distance_m=12.0,
+                ),
+            )
+        ],
+    )
+    weather = WeatherState(
+        air_temp_c=26.0,
+        humidity_pct=55.0,
+        pressure_hpa=1010.0,
+        wind_speed_mps=2.0,
+        wind_direction_deg=180.0,
+        rain_intensity_mm_h=0.0,
+        cloud_cover_pct=20.0,
+        visibility_m=1000.0,
+    )
+    track_state = TrackState(
+        track_temp_c=32.0,
+        grip_level=0.96,
+        rubber_level=0.4,
+        wetness_level=0.0,
+        standing_water_level=0.0,
+        dirt_offline_level=0.2,
+        drying_rate=0.02,
+        surface_evolution_rate=0.01,
+    )
+    cars = [
+        _car(car_id="car_01", position=1, cumulative_time_s=90.0, ers_soc=0.38, gap_ahead_s=0.0),
+        _car(car_id="car_02", position=2, cumulative_time_s=90.3, ers_soc=0.9, gap_ahead_s=0.3),
+    ]
+    actions = {
+        "car_01": RaceAction(
+            schema_version=RACE_ACTION_SCHEMA,
+            car_id="car_01", lap=1, pace_mode="balanced", ers_mode="hybrid",
+            aero_mode="corner", attack=False, defend=True, pit_this_lap=False,
+            risk_level=0.74, source_mode="test", note="depleted defend",
+        ),
+        "car_02": RaceAction(
+            schema_version=RACE_ACTION_SCHEMA,
+            car_id="car_02", lap=1, pace_mode="attack", ers_mode="boost",
+            aero_mode="straight", attack=True, defend=False, pit_this_lap=False,
+            risk_level=0.8, source_mode="test", note="closing attack",
+        ),
+    }
+
+    _, events, _ = microkernel.resolve_lap(
+        lap=1, total_laps=5, cars=cars, actions=actions, track=track,
+        weather=weather, track_state=track_state, safety_car_active=False,
+    )
+
+    unsafe_legal_events = [e for e in events if e.event_type == "unsafe_legal_state"]
+
+    # Must emit — dangerous geometry triggers regardless of track identity
+    assert unsafe_legal_events, (
+        "unsafe_legal_state must emit for any track with dangerous segment geometry, "
+        "not only for Suzuka"
+    )
+
+    details = unsafe_legal_events[0].details
+
+    # Safety oracle must have been called — verdict present
+    assert "safety_verdict" in details
+    sv = details["safety_verdict"]
+    assert isinstance(sv, dict)
+    assert "status" in sv
+
+    # safety_verdict present and consistent
+    assert details["safety_status"] == sv["status"]
+
+    # slice_hint derived from segment properties, not track identity
+    assert details["slice_hint"] == "confined_corner_unsafe_legal"
+
+    # No reference to suzuka in the event
+    import json
+    event_json = json.dumps(details)
+    assert "suzuka" not in event_json.lower()
+    assert "spoon" not in event_json.lower()

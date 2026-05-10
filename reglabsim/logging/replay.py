@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,22 @@ def _strip_nondeterministic_fields(payload: Any) -> Any:
     return payload
 
 
+def _make_event_ref(event: dict[str, Any], ordinal: int) -> str:
+    """Return deterministic event_ref: ``{type}:{lap}:{segment_id}:{car_id}:{ordinal:04d}``."""
+    event_type = str(event.get("event_type", "unknown"))
+    lap = int(event.get("lap", 0))
+    segment_id = str(event.get("segment_id", "unknown"))
+    car_id = str(event.get("car_id", "unknown"))
+    return f"{event_type}:{lap}:{segment_id}:{car_id}:{ordinal:04d}"
+
+
+def _make_content_hash(event: dict[str, Any]) -> str:
+    """Return 12-char sha256 of event with nondeterministic fields stripped."""
+    stable = _strip_nondeterministic_fields(event)
+    content_str = json.dumps(stable, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(content_str.encode("utf-8")).hexdigest()[:12]
+
+
 class ReplayEngine:
     """Persist and replay run outputs."""
 
@@ -122,10 +139,10 @@ class ReplayEngine:
         event_envelopes = self._build_event_envelopes(run_output)
         unsafe_legal_states = self._extract_unsafe_legal_states(run_output)
         legal_verdicts = self._extract_legal_verdicts(run_output)
-        patch_reruns = self._extract_patch_reruns(run_output)
         state_hashes = self._build_state_hashes(run_output)
         replay_integrity = self._build_replay_integrity(run_output)
         unsafe_legal_metrics = self._build_unsafe_legal_metrics(unsafe_legal_states)
+        patch_reruns = self._extract_patch_reruns(run_output, unsafe_legal_metrics)
         bundle = EvidenceBundle(
             schema_version=self.EVIDENCE_BUNDLE_SCHEMA,
             run_id=str(manifest.get("run_id", "")),
@@ -276,19 +293,30 @@ class ReplayEngine:
         slice_id = manifest.get("slice_id")
         patch_id = manifest.get("patch_id")
         envelopes: list[dict[str, Any]] = []
+        ordinal_counter: dict[str, int] = defaultdict(int)
         for index, event in enumerate(run_output.get("event_log", [])):
             event_payload = event if isinstance(event, dict) else {"raw_event": event}
             event_type = str(event_payload.get("event_type", "unknown"))
+            lap = int(event_payload.get("lap", 0))
+            segment_id = str(event_payload.get("segment_id", "unknown"))
+            car_id = str(event_payload.get("car_id", "unknown"))
+            group_key = f"{event_type}:{lap}:{segment_id}:{car_id}"
+            ordinal = ordinal_counter[group_key]
+            ordinal_counter[group_key] += 1
+            event_ref = _make_event_ref(event_payload, ordinal)
+            content_hash = _make_content_hash(event_payload)
             payload_copy = dict(event_payload)
             self._normalize_legal_status_in_payload(payload_copy)
             envelopes.append(
                 {
                     "schema_version": EVENT_ENVELOPE_SCHEMA,
                     "event_id": f"{run_id}:event:{index:04d}",
+                    "event_ref": event_ref,
+                    "event_content_hash": content_hash,
                     "run_id": run_id,
                     "event_type": event_type,
-                    "lap": int(event_payload.get("lap", 0)),
-                    "segment_id": str(event_payload.get("segment_id", "unknown")),
+                    "lap": lap,
+                    "segment_id": segment_id,
                     "payload": payload_copy,
                     "state_hash_before": None,
                     "state_hash_after": None,
@@ -391,6 +419,7 @@ class ReplayEngine:
                 "max_closing_speed_kph": None,
                 "safety_verdict_status_counts": {},
                 "unsafe_legal_segments": [],
+                "unsafe_legal_event_refs": [],
             }
 
         hazard_scores: list[float] = []
@@ -399,6 +428,8 @@ class ReplayEngine:
         closing_speeds: list[float] = []
         status_counts: dict[str, int] = {}
         segments: set[str] = set()
+        event_refs: list[str] = []
+        ordinal_counter: dict[str, int] = defaultdict(int)
 
         for event in unsafe_legal_states:
             details = _extract_event_details(event)
@@ -441,6 +472,16 @@ class ReplayEngine:
             if isinstance(seg, str) and seg:
                 segments.add(seg)
 
+            # Deterministic event ref (per type/lap/segment/car group ordinal)
+            ev_type = str(event.get("event_type", "unsafe_legal_state"))
+            ev_lap = int(event.get("lap", 0))
+            ev_seg = str(event.get("segment_id", "unknown"))
+            ev_car = str(event.get("car_id", "unknown"))
+            group_key = f"{ev_type}:{ev_lap}:{ev_seg}:{ev_car}"
+            ordinal = ordinal_counter[group_key]
+            ordinal_counter[group_key] += 1
+            event_refs.append(_make_event_ref(event, ordinal))
+
         return {
             "unsafe_legal_state_count": len(unsafe_legal_states),
             "has_unsafe_legal_state": True,
@@ -453,6 +494,7 @@ class ReplayEngine:
             "max_closing_speed_kph": max(closing_speeds) if closing_speeds else None,
             "safety_verdict_status_counts": status_counts,
             "unsafe_legal_segments": sorted(segments),
+            "unsafe_legal_event_refs": sorted(event_refs),
         }
 
     def _extract_legal_verdicts(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
@@ -468,22 +510,132 @@ class ReplayEngine:
                 verdicts.append(legal_verdict_to_dict(entry))
         return verdicts
 
-    def _extract_patch_reruns(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
-        """Extract patch rerun metadata."""
+    def _extract_patch_reruns(
+        self,
+        run_output: dict[str, Any],
+        baseline_metrics: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Extract and enrich patch rerun metadata with event linkage and counterfactual report."""
         patch_reruns_raw = run_output.get("patch_reruns", [])
-        patch_reruns: list[dict[str, Any]] = (
+        raw_entries: list[dict[str, Any]] = (
             [item for item in patch_reruns_raw if isinstance(item, dict)]
             if isinstance(patch_reruns_raw, list)
             else []
         )
-
         counterfactuals_raw = run_output.get("counterfactuals", [])
         if isinstance(counterfactuals_raw, list):
-            patch_reruns.extend(
+            raw_entries.extend(
                 item for item in counterfactuals_raw if isinstance(item, dict)
             )
 
-        return patch_reruns
+        if not raw_entries:
+            return []
+
+        manifest = dict(run_output.get("manifest", {}))
+        baseline_run_id = str(manifest.get("run_id", ""))
+        baseline_config_hash = str(manifest.get("config_hash", ""))
+        baseline_world_id = str(manifest.get("world_id", "")) or None
+        baseline_seed = manifest.get("seed")
+        baseline_event_refs: list[str] = (baseline_metrics or {}).get(
+            "unsafe_legal_event_refs", []
+        )
+
+        enriched: list[dict[str, Any]] = []
+        for raw in raw_entries:
+            entry = dict(raw)
+            patched_run_id = str(entry.get("patched_run_id", ""))
+            patched_metrics = entry.get("patched_metrics") or {}
+
+            # Event linkage
+            target_event_refs: list[str] = entry.get("target_event_refs") or (
+                list(entry.get("baseline_metrics", {}).get("unsafe_legal_event_refs", None)
+                     or baseline_event_refs)
+            )
+            resolved_event_refs: list[str] = entry.get("resolved_event_refs") or (
+                patched_metrics.get("unsafe_legal_event_refs") or []
+            )
+            entry["target_event_refs"] = target_event_refs
+            entry["resolved_event_refs"] = resolved_event_refs
+
+            entry.setdefault("baseline_run_ref", baseline_run_id)
+            entry.setdefault("patched_run_ref", patched_run_id)
+            entry.setdefault(
+                "baseline_bundle_ref",
+                f"{baseline_run_id}:{baseline_config_hash}" if baseline_run_id else "",
+            )
+            _patched_config_hash = entry.get("patched_config_hash")
+            _patched_bundle_ref = (
+                f"{patched_run_id}:{_patched_config_hash}"
+                if patched_run_id and _patched_config_hash
+                else patched_run_id
+            )
+            entry.setdefault("patched_bundle_ref", _patched_bundle_ref)
+
+            # Reproducibility metadata (extends existing same_seed / same_world_id)
+            entry["reproducibility"] = {
+                "same_seed": entry.get("same_seed", False),
+                "same_world_id": entry.get("same_world_id", False),
+                "baseline_seed": baseline_seed,
+                "patched_seed": entry.get("patched_seed"),
+                "baseline_world_id": baseline_world_id,
+                "patched_world_id": entry.get("patched_world_id"),
+                "baseline_config_hash": baseline_config_hash or None,
+                "patched_config_hash": entry.get("patched_config_hash"),
+                "state_hash_coverage": "partial",
+            }
+
+            # Counterfactual report skeleton
+            if "counterfactual_report" not in entry:
+                entry["counterfactual_report"] = self._build_counterfactual_report(
+                    entry, target_event_refs, resolved_event_refs
+                )
+
+            enriched.append(entry)
+
+        return enriched
+
+    @staticmethod
+    def _build_counterfactual_report(
+        entry: dict[str, Any],
+        target_event_refs: list[str],
+        resolved_event_refs: list[str],
+    ) -> dict[str, Any]:
+        """Build counterfactual report skeleton from patch rerun entry."""
+        baseline_metrics = entry.get("baseline_metrics") or {}
+        patched_metrics = entry.get("patched_metrics") or {}
+        delta_metrics = entry.get("delta_metrics") or {}
+
+        baseline_count = int(baseline_metrics.get("unsafe_legal_state_count", 0))
+        patched_count = int(patched_metrics.get("unsafe_legal_state_count", 0))
+        verdict = str(delta_metrics.get("verdict") or entry.get("verdict") or "unknown")
+        mitigation_success = bool(delta_metrics.get("mitigation_success", False))
+
+        return {
+            "schema_version": "counterfactual_report.v1",
+            "patch_id": entry.get("patch_id", ""),
+            "patch_type": entry.get("patch_type", ""),
+            "baseline_run_id": entry.get("paired_with_run_id") or entry.get("baseline_run_ref", ""),
+            "patched_run_id": entry.get("patched_run_id") or entry.get("patched_run_ref", ""),
+            "target_event_refs": target_event_refs,
+            "resolved_event_refs": resolved_event_refs,
+            "baseline_summary": {
+                "unsafe_legal_state_count": baseline_count,
+                "max_hazard_score": baseline_metrics.get("max_hazard_score"),
+            },
+            "patched_summary": {
+                "unsafe_legal_state_count": patched_count,
+                "max_hazard_score": patched_metrics.get("max_hazard_score"),
+            },
+            "delta_summary": {
+                "unsafe_legal_state_count_delta": patched_count - baseline_count,
+                "verdict": verdict,
+                "mitigation_success": mitigation_success,
+            },
+            "limitations": [
+                "Patch is a deterministic counterfactual stress-test, "
+                "not a calibrated regulatory recommendation."
+            ],
+        }
 
     def _resolve_segment_focus(self, run_output: dict[str, Any]) -> str:
         """Resolve segment focus from manifest or spec falsification."""

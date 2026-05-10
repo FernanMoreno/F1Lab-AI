@@ -888,13 +888,72 @@ class RaceMicrokernel:
             1.0,
             1.0 + 3.0 * geometry_risk + runoff_risk * 0.5,
         )
-        # PR 3: regulation closing_speed_cap_kph caps effective delta before oracle evaluation.
-        # This is the causal integration point for paired patch replay — the patch modifies
-        # regulation["safety"]["closing_speed_cap_kph"], which flows into SafetyOracleInput
-        # before SafetyOracle.evaluate() is called. The oracle then sees the capped value.
-        _speed_cap = self._regulation.get("safety", {}).get("closing_speed_cap_kph")
+        # Track pre-patch delta for event metadata.
+        effective_delta_kph_before_patch = effective_delta_kph
+        regulatory_patch_effects: list[str] = []
+        _safety_reg = self._regulation.get("safety", {})
+
+        # closing_speed_cap (v1/v2 share same key, different cap values).
+        _speed_cap = _safety_reg.get("closing_speed_cap_kph")
         if isinstance(_speed_cap, (int, float)) and _speed_cap > 0:
-            effective_delta_kph = min(effective_delta_kph, float(_speed_cap))
+            if effective_delta_kph > float(_speed_cap):
+                effective_delta_kph = float(_speed_cap)
+                regulatory_patch_effects.append("closing_speed_cap_applied")
+
+        # minimum_reaction_margin_s: reduce effective delta when reaction margin is insufficient.
+        # Assumption: 0.85 multiplier is a deterministic stress-test proxy, not calibrated truth.
+        _min_margin = _safety_reg.get("minimum_reaction_margin_s")
+        if isinstance(_min_margin, (int, float)) and _min_margin > 0:
+            if reaction_margin_s < float(_min_margin):
+                effective_delta_kph *= 0.85
+                regulatory_patch_effects.append("minimum_reaction_margin_applied")
+
+        # confined_corner_attack_restriction: reduce delta in narrow corners with risky runoff.
+        # Assumption: 0.75 multiplier is a deterministic stress-test proxy, not calibrated truth.
+        if _safety_reg.get("confined_corner_attack_restriction"):
+            _confined_width = float(_safety_reg.get("confined_corner_width_m", 12.5))
+            _confined_runoffs: set[str] = set(
+                _safety_reg.get(
+                    "confined_corner_runoff_types",
+                    ["grass", "gravel", "wall", "barrier", "concrete"],
+                )
+                or []
+            )
+            _is_confined = (
+                segment.segment_type
+                in {"corner", "fast_corner", "chicane", "high_speed_corner_entry"}
+                and segment.width_m <= _confined_width
+                and segment.runoff.type in _confined_runoffs
+            )
+            if _is_confined:
+                effective_delta_kph *= 0.75
+                regulatory_patch_effects.append("confined_corner_attack_restriction_applied")
+
+        # active_aero_delay_high_risk: reduce delta under active aero / high geometry risk.
+        # Assumption: 0.85 multiplier is a deterministic stress-test proxy, not calibrated truth.
+        if _safety_reg.get("active_aero_delay_high_risk"):
+            _aero_threshold = float(_safety_reg.get("active_aero_delay_risk_threshold", 0.65))
+            _all_grey_flags = (
+                attacker_verdict["grey_area_flags"] + defender_verdict["grey_area_flags"]
+            )
+            _has_active_aero = (
+                "active_aero_attack_window" in _all_grey_flags
+                or geometry_risk >= _aero_threshold
+                or adjusted_risk >= _aero_threshold
+            )
+            if _has_active_aero:
+                effective_delta_kph *= 0.85
+                regulatory_patch_effects.append("active_aero_delay_high_risk_applied")
+
+        # pack_compression_overtake_limit: reduce delta under high pack compression.
+        # Assumption: 0.80 multiplier is a deterministic stress-test proxy, not calibrated truth.
+        if _safety_reg.get("pack_compression_overtake_limit"):
+            _pack_threshold = float(_safety_reg.get("pack_compression_threshold", 0.35))
+            if battle.pack_compression_ratio >= _pack_threshold:
+                effective_delta_kph *= 0.80
+                regulatory_patch_effects.append("pack_compression_overtake_limit_applied")
+
+        effective_delta_kph_after_patch = effective_delta_kph
 
         # ── Amplifiers and regulatory causes (preserved from pre-2B) ──
         reason_codes = list(
@@ -969,8 +1028,9 @@ class RaceMicrokernel:
             recommended_failure_tags.append("unsafe_closing_speed")
         if combined_status == "GREY_AREA":
             recommended_failure_tags.append("grey_area_exploit")
-        slice_hint = "suzuka_spoon_style"
-        if track.track_id != "suzuka" and "spoon" not in segment.name.lower():
+        if segment.segment_type == "corner" and segment.runoff.type in {"grass", "wall"}:
+            slice_hint = "confined_corner_unsafe_legal"
+        else:
             slice_hint = "fast_corner_unsafe_legal"
 
         return RaceEvent(
@@ -1022,6 +1082,10 @@ class RaceMicrokernel:
                 "inline_hazard_score_deprecated": round(
                     min(1.0, adjusted_risk * 0.5 + 0.2 + geometry_risk * 0.3), 3,
                 ),
+                # PR 7: patch effect metadata — which patches modified effective_delta_kph
+                "regulatory_patch_effects": regulatory_patch_effects,
+                "effective_delta_kph_before_patch": round(effective_delta_kph_before_patch, 1),
+                "effective_delta_kph_after_patch": round(effective_delta_kph_after_patch, 1),
             },
         )
 
