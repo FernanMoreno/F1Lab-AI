@@ -411,6 +411,8 @@ class SafetyVerdict:
     delta_speed_kph: float | None = None
     time_to_collision_s: float | None = None
     amplifiers: list[str] = field(default_factory=list)
+    regulatory_causes: list[str] = field(default_factory=list)
+    reason_codes: list[str] = field(default_factory=list)
     confidence: str = "low"
     evidence: dict[str, Any] = field(default_factory=dict)
 

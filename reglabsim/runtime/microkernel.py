@@ -16,8 +16,20 @@ from reglabsim.race.dirty_air import DirtyAirModel
 from reglabsim.race.slipstream import SlipstreamModel
 from reglabsim.race.traffic import TrafficModel
 from reglabsim.runtime.action_validator import ActionValidator
-from reglabsim.runtime.schema import CarRuntimeState, RaceAction, RaceEvent, RaceStateSnapshot
-from reglabsim.safety import PROFILE_CALIBRATIONS, TRACK_MODIFIERS, SafetyEventType, SafetyModel
+from reglabsim.runtime.schema import (
+    CarRuntimeState,
+    RaceAction,
+    RaceEvent,
+    RaceStateSnapshot,
+    SafetyStatus,
+)
+from reglabsim.safety import (
+    PROFILE_CALIBRATIONS,
+    TRACK_MODIFIERS,
+    SafetyEventType,
+    SafetyModel,
+)
+from reglabsim.safety.safety_oracle import SafetyOracle, SafetyOracleInput
 from reglabsim.track.geometry import TrackModel
 from reglabsim.track.local_risk import LocalRiskAssessment, LocalRiskModel
 from reglabsim.track.segments import TrackSegment
@@ -827,41 +839,57 @@ class RaceMicrokernel:
         if not unsafe_candidate:
             return None
 
+        # ── Build SafetyOracleInput from available runtime context ──
         closing_trigger_kph = max(
             24.0,
             battle.battle_segment.risk.unsafe_closing_speed_threshold_kph * 0.72,
         )
-        closing_pressure = min(
-            1.0,
-            max(0.0, battle.closing_speed_kph - closing_trigger_kph) / 18.0,
-        )
-        width_pressure = min(1.0, max(0.0, (12.5 - segment.width_m) / 3.5))
-        runoff_pressure = 1.0 if segment.runoff.type in UNSAFE_LEGAL_RUNOFF_TYPES else 0.55
-        visibility_pressure = min(1.0, max(0.0, (900.0 - weather.visibility_m) / 500.0))
-        wet_pressure = min(1.0, track_state.wetness_level)
-        tag_pressure = 0.0
-        if "no_escape_zone_failure" in battle.risk.recommended_failure_tags:
-            tag_pressure += 0.06
-        if "tight_spatial_failure" in battle.risk.recommended_failure_tags:
-            tag_pressure += 0.03
-        hazard_score = round(
-            min(
-                1.0,
-                0.28
-                + adjusted_risk * 0.32
-                + closing_pressure * 0.18
-                + width_pressure * 0.08
-                + runoff_pressure * 0.06
-                + visibility_pressure * 0.04
-                + wet_pressure * 0.04
-                + battle.pack_compression_ratio * 0.08
-                + tag_pressure,
-            ),
-            3,
-        )
-        if battle.closing_speed_kph < closing_trigger_kph or hazard_score < 0.6:
-            return None
 
+        # Geometric risk captures track layout danger factors
+        width_pressure = min(1.0, max(0.0, (12.5 - segment.width_m) / 3.5))
+        geometry_risk = max(
+            0.0,
+            width_pressure,
+            adjusted_risk,
+            0.4 if segment.risk.side_by_side_risk == "high" else (
+                0.7 if segment.risk.side_by_side_risk == "critical" else 0.0
+            ),
+            (
+                min(1.0, max(0.0, (18.0 - segment.risk.barrier_distance_m) / 12.0))
+                if segment.risk.barrier_distance_m > 0
+                else 0.0
+            ),
+        )
+        runoff_risk = 1.0 if segment.runoff.type in UNSAFE_LEGAL_RUNOFF_TYPES else 0.6
+
+        # Perception delay from visibility and closing speed
+        visibility_pressure = min(1.0, max(0.0, (900.0 - weather.visibility_m) / 500.0))
+        perception_delay = 0.3
+        if weather.visibility_m < 900.0:
+            perception_delay = 1.0
+        elif battle.closing_speed_kph >= closing_trigger_kph + 8.0:
+            perception_delay = 0.5
+
+        # Condition risk blends weather factors
+        condition_pressure = (visibility_pressure + track_state.wetness_level) / 2.0
+
+        # Compute TTC and reaction margin
+        relative_speed_mps = max(0.1, battle.closing_speed_kph / 3.6)
+        time_to_collision_s = round(battle.battle_distance_m / relative_speed_mps, 3)
+        reaction_margin_s = round(
+            time_to_collision_s * battle.risk.evasive_action_success_probability, 3,
+        )
+
+        # Effective closing speed: amplify by corner geometry
+        # A 27kph closing speed in Spoon's narrow corner is equivalent to
+        # a much higher speed on a wide straight — the oracle should see
+        # the amplified effective hazard, not the raw physics delta.
+        effective_delta_kph = battle.closing_speed_kph * max(
+            1.0,
+            1.0 + 3.0 * geometry_risk + runoff_risk * 0.5,
+        )
+
+        # ── Amplifiers and regulatory causes (preserved from pre-2B) ──
         reason_codes = list(
             dict.fromkeys(
                 attacker_verdict["reason_codes"] + defender_verdict["reason_codes"]
@@ -871,17 +899,6 @@ class RaceMicrokernel:
             dict.fromkeys(
                 attacker_verdict["grey_area_flags"] + defender_verdict["grey_area_flags"]
             )
-        )
-        supporting_events = [
-            se.event_type.value
-            for se in safety_events
-            if se.event_type in {SafetyEventType.NEAR_MISS, SafetyEventType.WARNING}
-        ]
-        relative_speed_mps = max(0.1, battle.closing_speed_kph / 3.6)
-        time_to_collision_s = round(battle.battle_distance_m / relative_speed_mps, 3)
-        reaction_margin_s = round(
-            time_to_collision_s * battle.risk.evasive_action_success_probability,
-            3,
         )
         regulatory_causes = list(dict.fromkeys(reason_codes + grey_area_flags))
         track_amplifiers: list[str] = []
@@ -905,6 +922,41 @@ class RaceMicrokernel:
         pack_amplifiers: list[str] = []
         if battle.pack_compression_ratio >= 0.35:
             pack_amplifiers.append("pack_compression")
+
+        # ── PR 2B: SafetyOracle-driven emission decision ──
+        oracle_input = SafetyOracleInput(
+            legal_verdict={"status": combined_status},
+            track=track.track_id,
+            segment_id=segment.segment_id,
+            cars_involved=[attacker.car_id, defender.car_id],
+            delta_speed_kph=round(effective_delta_kph, 1),
+            time_to_collision_s=time_to_collision_s,
+            reaction_margin_s=reaction_margin_s,
+            segment_risk=round(geometry_risk, 3),
+            surface_runoff_risk=round(runoff_risk, 3),
+            perception_delay_s=round(perception_delay, 3),
+            condition_risk=round(condition_pressure, 3),
+            pack_risk=round(battle.pack_compression_ratio, 3),
+            regulatory_causes=list(regulatory_causes),
+            track_amplifiers=list(track_amplifiers),
+            surface_amplifiers=list(surface_amplifiers),
+            condition_amplifiers=list(condition_amplifiers),
+            perception_amplifiers=list(perception_amplifiers),
+            pack_amplifiers=list(pack_amplifiers),
+        )
+
+        safety_verdict = SafetyOracle().evaluate(oracle_input)
+
+        # Only emit if oracle classifies as UNSAFE_LEGAL or CRITICAL
+        if safety_verdict.status not in {SafetyStatus.UNSAFE_LEGAL, SafetyStatus.CRITICAL}:
+            return None
+
+        # ── Build event with legacy fields + safety_verdict ──
+        supporting_events = [
+            se.event_type.value
+            for se in safety_events
+            if se.event_type in {SafetyEventType.NEAR_MISS, SafetyEventType.WARNING}
+        ]
         recommended_failure_tags = list(dict.fromkeys(battle.risk.recommended_failure_tags))
         if "unsafe_closing_speed" not in recommended_failure_tags:
             recommended_failure_tags.append("unsafe_closing_speed")
@@ -920,13 +972,14 @@ class RaceMicrokernel:
             car_id=defender.car_id if defender_action.defend else attacker.car_id,
             segment_id=segment.segment_id,
             details={
+                # Legacy fields preserved for backward compatibility
                 "attacker_id": attacker.car_id,
                 "defender_id": defender.car_id,
                 "legal_status": combined_status,
-                "safety_status": "UNSAFE_LEGAL",
+                "safety_status": safety_verdict.status.value,
                 "companion_event_type": main_event_type,
                 "non_contact": True,
-                "hazard_score": hazard_score,
+                "hazard_score": safety_verdict.hazard_score,
                 "reaction_margin_s": reaction_margin_s,
                 "time_to_collision_s": time_to_collision_s,
                 "closing_speed_kph": battle.closing_speed_kph,
@@ -950,11 +1003,17 @@ class RaceMicrokernel:
                 "perception_amplifiers": perception_amplifiers,
                 "pack_amplifiers": pack_amplifiers,
                 "supporting_safety_events": supporting_events,
-                "confidence": "medium" if hazard_score >= 0.72 else "low",
+                "confidence": safety_verdict.confidence,
                 "recommended_failure_tags": recommended_failure_tags,
                 "steward_review_recommended": (
                     attacker_verdict["steward_review_recommended"]
                     or defender_verdict["steward_review_recommended"]
+                ),
+                # PR 2B: structured safety_verdict from oracle
+                "safety_verdict": safety_verdict.to_dict(),
+                # Original (pre-2B) inline hazard preserved as reference
+                "inline_hazard_score_deprecated": round(
+                    min(1.0, adjusted_risk * 0.5 + 0.2 + geometry_risk * 0.3), 3,
                 ),
             },
         )

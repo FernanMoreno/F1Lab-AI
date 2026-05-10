@@ -10,7 +10,7 @@ def test_safety_oracle():
     oracle = SafetyOracle()
 
     # Test with a mock context
-    context = SafetyContext(
+    _context = SafetyContext(
         legal_verdict=None,  # In a real test, we would create a mock LegalVerdict
         delta_speed_kph=45.0,
         reaction_margin_s=1.5,

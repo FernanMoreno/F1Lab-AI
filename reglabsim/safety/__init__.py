@@ -3,7 +3,7 @@
 from .calibration import PROFILE_CALIBRATIONS, TRACK_MODIFIERS
 from .events import SafetyEventType
 from .model import SafetyModel
-from .safety_oracle import SafetyContext, SafetyOracle
+from .safety_oracle import SafetyContext, SafetyOracle, SafetyOracleInput
 
 __all__ = [
     "PROFILE_CALIBRATIONS",
@@ -11,5 +11,6 @@ __all__ = [
     "SafetyContext",
     "SafetyEventType",
     "SafetyModel",
-    "SafetyOracle"
+    "SafetyOracle",
+    "SafetyOracleInput",
 ]
