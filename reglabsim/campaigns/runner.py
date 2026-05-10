@@ -35,6 +35,49 @@ from reglabsim.steward.engine import StewardEngine
 from reglabsim.track.track_loader import TrackRepository
 
 
+def compare_patch_metrics(
+    baseline_metrics: dict[str, Any],
+    patched_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute delta between baseline and patched unsafe-legal metrics.
+
+    verdict values:
+      "mitigated"  — baseline_count > 0 and patched_count == 0
+      "improved"   — patched_count < baseline_count but patched_count > 0
+      "unchanged"  — patched_count == baseline_count
+      "worse"      — patched_count > baseline_count
+
+    mitigation_success is True only when verdict == "mitigated" (full elimination).
+    """
+
+    def _delta(key: str) -> float | None:
+        b = baseline_metrics.get(key)
+        p = patched_metrics.get(key)
+        if isinstance(b, (int, float)) and isinstance(p, (int, float)):
+            return round(float(p) - float(b), 6)
+        return None
+
+    baseline_count = int(baseline_metrics.get("unsafe_legal_state_count", 0))
+    patched_count = int(patched_metrics.get("unsafe_legal_state_count", 0))
+
+    if baseline_count > 0 and patched_count == 0:
+        verdict = "mitigated"
+    elif patched_count < baseline_count:
+        verdict = "improved"
+    elif patched_count == baseline_count:
+        verdict = "unchanged"
+    else:
+        verdict = "worse"
+
+    return {
+        "unsafe_legal_state_count_delta": patched_count - baseline_count,
+        "max_hazard_score_delta": _delta("max_hazard_score"),
+        "mean_hazard_score_delta": _delta("mean_hazard_score"),
+        "verdict": verdict,
+        "mitigation_success": verdict == "mitigated",
+    }
+
+
 class CampaignRunner:
     """Run single races and multi-run campaigns."""
 
@@ -635,6 +678,21 @@ class CampaignRunner:
                 },
                 "enforcement_overrides": {},
                 "expected_tradeoffs": ["more stable attack prep", "less burst exploitation"],
+            },
+            "closing_speed_cap_v1": {
+                "name": "closing_speed_cap_v1",
+                "patch_type": "closing_speed_cap",
+                "description": (
+                    "Cap effective delta speed fed to SafetyOracle before evaluation. "
+                    "Causally reduces hazard score by limiting amplified closing speed."
+                ),
+                "failure_targets": ["unsafe_closing_speed", "unsafe_legal_state"],
+                "regulation_overrides": {"safety": {"closing_speed_cap_kph": 65.0}},
+                "enforcement_overrides": {},
+                "expected_tradeoffs": [
+                    "lower effective hazard score",
+                    "fewer unsafe_legal_state emissions",
+                ],
             },
         }
         if patch in catalog:

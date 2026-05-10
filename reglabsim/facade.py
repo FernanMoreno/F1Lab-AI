@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from reglabsim.campaigns.runner import CampaignRunner
+from reglabsim.campaigns.runner import CampaignRunner, compare_patch_metrics
 from reglabsim.campaigns.spec import CampaignSpec
 from reglabsim.conditions.repository import ConditionProfileRepository
 from reglabsim.conditions.scenarios import (
@@ -1054,6 +1054,97 @@ class SimulationFacadeImpl:
             "counterfactual": evaluation["counterfactual_manifest"],
             "comparison": evaluation["comparison"],
             "rerun": evaluation["rerun"],
+        }
+
+    def run_paired_patch_replay(
+        self,
+        config_path: str | Path,
+        patch: dict[str, Any] | str | None = None,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        """Run a baseline then a patched rerun and export paired patch_reruns.
+
+        The patch causally modifies regulation before SafetyOracle.evaluate() is called.
+        Default patch is closing_speed_cap_v1 (caps effective_delta_kph at 65 kph).
+
+        Returns a dict with:
+          - patch_rerun: the structured patch_reruns entry
+          - baseline_run / patched_run: raw run outputs
+          - evidence_bundle: EvidenceBundle with patch_reruns populated
+        """
+        runner = self._campaign_runner()
+        # Resolve string patch id via catalog; None defaults to closing_speed_cap_v1
+        if patch is None or patch == "closing_speed_cap_v1":
+            resolved_patch: dict[str, Any] = runner._resolve_patch_candidate("closing_speed_cap_v1")
+        elif isinstance(patch, str):
+            resolved_patch = runner._resolve_patch_candidate(patch)
+        else:
+            resolved_patch = dict(patch)
+
+        baseline = self.run_falsification_slice(config_path, seed=seed)
+        patch_result = self.evaluate_patch(baseline, patch=resolved_patch)
+
+        baseline_bundle = self._replay.build_evidence_bundle(baseline)
+        patched_bundle = self._replay.build_evidence_bundle(patch_result["rerun"])
+
+        _metric_keys = ("unsafe_legal_state_count", "max_hazard_score", "mean_hazard_score")
+        baseline_metrics: dict[str, Any] = {
+            k: baseline_bundle["metrics"].get(k) for k in _metric_keys
+        }
+        patched_metrics: dict[str, Any] = {
+            k: patched_bundle["metrics"].get(k) for k in _metric_keys
+        }
+        delta = compare_patch_metrics(baseline_metrics, patched_metrics)
+
+        patch_id = str(resolved_patch.get("name", resolved_patch.get("patch_id", "custom_patch")))
+        patch_type = str(resolved_patch.get("patch_type", patch_id))
+
+        baseline_world_id = baseline["manifest"].get("world_id")
+        patched_world_id = patch_result["rerun"]["manifest"].get("world_id")
+        same_world_id = (
+            baseline_world_id is not None
+            and baseline_world_id == patched_world_id
+        )
+        baseline_seed = baseline["manifest"].get("seed")
+        patched_seed = patch_result["rerun"]["manifest"].get("seed")
+        same_seed = baseline_seed == patched_seed
+
+        notes: list[str] = []
+        if not same_seed:
+            notes.append(
+                f"seed differs: baseline={baseline_seed!r} patched={patched_seed!r}"
+            )
+        if not same_world_id:
+            notes.append(
+                f"world_id differs: baseline={baseline_world_id!r} patched={patched_world_id!r}"
+            )
+
+        patch_rerun_entry: dict[str, Any] = {
+            "patch_id": patch_id,
+            "patch_type": patch_type,
+            "paired_with_run_id": baseline["manifest"]["run_id"],
+            "patched_run_id": patch_result["rerun"]["manifest"]["run_id"],
+            "same_seed": same_seed,
+            "same_world_id": same_world_id,
+            "baseline_metrics": baseline_metrics,
+            "patched_metrics": patched_metrics,
+            "delta_metrics": delta,
+            "verdict": delta["verdict"],
+            "notes": notes,
+        }
+
+        enriched_baseline = {**baseline, "patch_reruns": [patch_rerun_entry]}
+        evidence_bundle = self._replay.build_evidence_bundle(enriched_baseline)
+
+        return {
+            "mode": "paired_patch_replay",
+            "patch_id": patch_id,
+            "patch_rerun": patch_rerun_entry,
+            "baseline_run": baseline,
+            "patched_run": patch_result["rerun"],
+            "baseline_bundle": baseline_bundle,
+            "patched_bundle": patched_bundle,
+            "evidence_bundle": evidence_bundle,
         }
 
     def evaluate_patch(

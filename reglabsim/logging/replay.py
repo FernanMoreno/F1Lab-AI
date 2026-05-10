@@ -29,6 +29,26 @@ _NONDETERMINISTIC_FIELDS: frozenset[str] = frozenset({
 })
 
 
+def _extract_event_details(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Return details sub-dict from an unsafe_legal_state event.
+
+    Shape A: event["details"]  — standard RaceEvent.to_dict()
+    Shape B: event["payload"]["details"]  — event envelope format
+    Fallback: event itself when hazard_score is top-level
+    """
+    details = event.get("details")
+    if isinstance(details, dict):
+        return details
+    payload = event.get("payload")
+    if isinstance(payload, dict):
+        inner = payload.get("details")
+        if isinstance(inner, dict):
+            return inner
+    if "hazard_score" in event:
+        return event
+    return None
+
+
 def _strip_nondeterministic_fields(payload: Any) -> Any:
     """Recursively remove non-deterministic fields from *payload* for hashing.
 
@@ -105,6 +125,7 @@ class ReplayEngine:
         patch_reruns = self._extract_patch_reruns(run_output)
         state_hashes = self._build_state_hashes(run_output)
         replay_integrity = self._build_replay_integrity(run_output)
+        unsafe_legal_metrics = self._build_unsafe_legal_metrics(unsafe_legal_states)
         bundle = EvidenceBundle(
             schema_version=self.EVIDENCE_BUNDLE_SCHEMA,
             run_id=str(manifest.get("run_id", "")),
@@ -120,7 +141,7 @@ class ReplayEngine:
             event_envelopes=event_envelopes,
             unsafe_legal_states=unsafe_legal_states,
             patch_reruns=patch_reruns,
-            metrics=dict(run_output.get("metrics", {})),
+            metrics={**dict(run_output.get("metrics", {})), **unsafe_legal_metrics},
             state_hashes=state_hashes,
             replay_integrity=replay_integrity,
         )
@@ -354,6 +375,85 @@ class ReplayEngine:
             event for event in events
             if isinstance(event, dict) and event.get("event_type") == "unsafe_legal_state"
         ]
+
+    def _build_unsafe_legal_metrics(
+        self, unsafe_legal_states: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Compute aggregate hazard metrics from unsafe legal state events."""
+        if not unsafe_legal_states:
+            return {
+                "unsafe_legal_state_count": 0,
+                "has_unsafe_legal_state": False,
+                "max_hazard_score": None,
+                "mean_hazard_score": None,
+                "min_reaction_margin_s": None,
+                "max_delta_speed_kph": None,
+                "max_closing_speed_kph": None,
+                "safety_verdict_status_counts": {},
+                "unsafe_legal_segments": [],
+            }
+
+        hazard_scores: list[float] = []
+        reaction_margins: list[float] = []
+        delta_speeds: list[float] = []
+        closing_speeds: list[float] = []
+        status_counts: dict[str, int] = {}
+        segments: set[str] = set()
+
+        for event in unsafe_legal_states:
+            details = _extract_event_details(event)
+            if details is None:
+                continue
+            sv: dict[str, Any] = details.get("safety_verdict") or {}
+
+            # safety_verdict is canonical; details fields are legacy fallback
+            hs = sv.get("hazard_score")
+            if hs is None:
+                hs = details.get("hazard_score")
+            if isinstance(hs, (int, float)):
+                hazard_scores.append(float(hs))
+
+            rm = sv.get("reaction_margin_s")
+            if rm is None:
+                rm = details.get("reaction_margin_s")
+            if isinstance(rm, (int, float)):
+                reaction_margins.append(float(rm))
+
+            ds = sv.get("delta_speed_kph")
+            if ds is None:
+                ds = details.get("delta_speed_kph")
+            if isinstance(ds, (int, float)):
+                delta_speeds.append(float(ds))
+
+            cs = details.get("closing_speed_kph")
+            if cs is None:
+                cs = sv.get("closing_speed_kph")
+            if isinstance(cs, (int, float)):
+                closing_speeds.append(float(cs))
+
+            status: str | None = sv.get("status") if isinstance(sv, dict) else None
+            if status is None:
+                status = details.get("safety_status")
+            if isinstance(status, str):
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            seg = event.get("segment_id") or details.get("segment_id")
+            if isinstance(seg, str) and seg:
+                segments.add(seg)
+
+        return {
+            "unsafe_legal_state_count": len(unsafe_legal_states),
+            "has_unsafe_legal_state": True,
+            "max_hazard_score": max(hazard_scores) if hazard_scores else None,
+            "mean_hazard_score": (
+                round(sum(hazard_scores) / len(hazard_scores), 6) if hazard_scores else None
+            ),
+            "min_reaction_margin_s": min(reaction_margins) if reaction_margins else None,
+            "max_delta_speed_kph": max(delta_speeds) if delta_speeds else None,
+            "max_closing_speed_kph": max(closing_speeds) if closing_speeds else None,
+            "safety_verdict_status_counts": status_counts,
+            "unsafe_legal_segments": sorted(segments),
+        }
 
     def _extract_legal_verdicts(self, run_output: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract and normalize legal verdicts from validation log."""

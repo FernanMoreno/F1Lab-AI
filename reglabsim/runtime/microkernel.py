@@ -888,6 +888,13 @@ class RaceMicrokernel:
             1.0,
             1.0 + 3.0 * geometry_risk + runoff_risk * 0.5,
         )
+        # PR 3: regulation closing_speed_cap_kph caps effective delta before oracle evaluation.
+        # This is the causal integration point for paired patch replay — the patch modifies
+        # regulation["safety"]["closing_speed_cap_kph"], which flows into SafetyOracleInput
+        # before SafetyOracle.evaluate() is called. The oracle then sees the capped value.
+        _speed_cap = self._regulation.get("safety", {}).get("closing_speed_cap_kph")
+        if isinstance(_speed_cap, (int, float)) and _speed_cap > 0:
+            effective_delta_kph = min(effective_delta_kph, float(_speed_cap))
 
         # ── Amplifiers and regulatory causes (preserved from pre-2B) ──
         reason_codes = list(
