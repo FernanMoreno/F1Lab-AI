@@ -60,7 +60,12 @@ def build_nvidia_llm(model: str | None = None) -> Any:
             "Export it before calling build_nvidia_llm()."
         )
 
-    resolved_model = model or os.getenv("F1LAB_NVIDIA_MODEL", _DEFAULT_MODEL)
+    resolved_model = (
+        model
+        or os.getenv("NVIDIA_MODEL_NAME")
+        or os.getenv("F1LAB_NVIDIA_MODEL")
+        or _DEFAULT_MODEL
+    )
     return ChatNVIDIA(model=resolved_model)
 
 

@@ -56,6 +56,7 @@ rl = [
 agents = [
     "deepagents>=1.0",
     "langgraph>=0.2",
+    "langchain>=0.3",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
 ]
@@ -185,4 +186,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["langchain_nvidia_ai_endpoints"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["langchain", "langchain.tools", "langchain_core", "langchain_core.tools"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["deepagents", "langgraph"]
 ignore_missing_imports = true
