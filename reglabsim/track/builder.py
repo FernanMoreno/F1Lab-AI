@@ -213,7 +213,7 @@ class GeospatialTrackBuilder:
         """Fetch a raceway centerline via OSMnx and build a track YAML seed."""
         expected_length_m = self._expected_length_from_metadata(metadata)
         try:
-            import osmnx as ox  # type: ignore
+            import osmnx as ox
 
             tags = {"highway": "raceway"}
             north = latitude + search_radius_m / 111_000.0

@@ -83,7 +83,7 @@ class ScenarioSampler:
         Returns:
             List of sampled scenarios.
         """
-        from scipy.stats import qmc  # type: ignore
+        from scipy.stats import qmc
 
         n_params = len(space)
         param_names = list(space.keys())

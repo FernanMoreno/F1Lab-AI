@@ -62,7 +62,7 @@ class ConfidenceIntervalCalculator:
         Returns:
             (lower, upper) bounds.
         """
-        from scipy.stats import t  # type: ignore
+        from scipy.stats import t
 
         alpha = 1 - confidence_level
         df = max(1, n - 1)  # Degrees of freedom

@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 try:
-    import streamlit as st  # type: ignore[import-not-found]
+    import streamlit as st
 except ImportError:  # pragma: no cover - UI dependency is optional in tests.
     st = None
 

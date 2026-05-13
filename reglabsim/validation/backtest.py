@@ -103,7 +103,7 @@ class Backtester:
         Returns:
             Dict of averaged metrics.
         """
-        from sklearn.model_selection import KFold  # type: ignore
+        from sklearn.model_selection import KFold
 
         kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 

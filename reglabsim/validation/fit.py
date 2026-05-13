@@ -67,7 +67,7 @@ class ParameterFitter:
         Returns:
             FitResult with fitted parameters.
         """
-        import scipy.optimize  # type: ignore
+        import scipy.optimize
 
         def objective(params_dict: dict[str, Any]) -> float:
             # Run simulation

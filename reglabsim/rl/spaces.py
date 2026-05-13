@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 try:  # pragma: no cover - exercised when gymnasium is installed
-    import gymnasium.spaces as gym_spaces  # type: ignore
+    import gymnasium.spaces as gym_spaces
 except Exception:  # pragma: no cover - lightweight fallback for base environments
     @dataclass(frozen=True)
     class Discrete:
