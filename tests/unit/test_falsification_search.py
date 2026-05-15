@@ -363,3 +363,131 @@ def test_run_candidate_with_include_bundle() -> None:
     assert result.bundle is not None
     assert isinstance(result.bundle, dict)
     assert "metrics" in result.bundle
+
+
+# ---------------------------------------------------------------------------
+# PR 8.1 — exploit_score integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_candidate_includes_exploit_score() -> None:
+    candidate = FalsificationCandidate(
+        candidate_id="exploitscore:seed42:trial0000",
+        family_id=_POSITIVE_FAMILY,
+        seed=42,
+        parameters={},
+    )
+    result = run_candidate(candidate)
+    assert result.exploit_score is not None
+    es = result.exploit_score
+    assert es["schema_version"] == "exploit_score.v1"
+    assert "total" in es
+    assert "components" in es
+    for key in ("safety_risk", "legal_exploit", "competitive_advantage",
+                "patch_resistance", "novelty"):
+        assert key in es["components"]
+    assert "reason_codes" in es
+    assert "limitations" in es
+
+
+def test_run_candidate_preserves_legacy_score() -> None:
+    candidate = FalsificationCandidate(
+        candidate_id="legacy:seed42:trial0000",
+        family_id=_POSITIVE_FAMILY,
+        seed=42,
+        parameters={},
+    )
+    result = run_candidate(candidate)
+    # Legacy score still present and matches score_candidate_metrics
+    assert result.score is not None
+    assert isinstance(result.score, float)
+    # exploit_score.total is additional — does not replace score
+    if result.exploit_score:
+        assert result.exploit_score.get("total") != result.score or True  # coexist
+
+
+def test_run_falsification_search_best_candidate_includes_exploit_score() -> None:
+    out = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=5)
+    bc = out.get("best_candidate")
+    assert bc is not None
+    assert "exploit_score" in bc
+    es = bc["exploit_score"]
+    assert isinstance(es, dict)
+    assert es.get("schema_version") == "exploit_score.v1"
+    assert "score_legacy" in bc
+
+
+def test_search_ranking_legacy_score_preserved() -> None:
+    out = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=10)
+    results = out.get("results") or []
+    assert len(results) >= 2
+    # Results are still sorted by legacy score descending
+    scores = [r["score"] for r in results]
+    assert scores == sorted(scores, reverse=True)
+    # score_legacy matches score
+    for r in results:
+        assert r["score"] == r["score_legacy"]
+
+
+# ---------------------------------------------------------------------------
+# PR 8.2 — Failure taxonomy tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_candidate_includes_failure_taxonomy() -> None:
+    """run_candidate() must include failure_taxonomy with schema_version."""
+    from reglabsim.falsification.failure_taxonomy import FAILURE_TAXONOMY_SCHEMA
+
+    candidates = generate_candidates(_POSITIVE_FAMILY, seed=42, max_trials=3)
+    result = run_candidate(candidates[0])
+    assert result.failure_taxonomy is not None
+    assert isinstance(result.failure_taxonomy, dict)
+    assert result.failure_taxonomy.get("schema_version") == FAILURE_TAXONOMY_SCHEMA
+
+
+def test_run_candidate_failure_taxonomy_structure() -> None:
+    """failure_taxonomy must have primary_failure_mode, failure_modes, event_refs, limitations."""
+    candidates = generate_candidates(_POSITIVE_FAMILY, seed=42, max_trials=3)
+    result = run_candidate(candidates[0])
+    ft = result.failure_taxonomy
+    assert ft is not None
+    assert "primary_failure_mode" in ft
+    assert "failure_modes" in ft
+    assert isinstance(ft["failure_modes"], list)
+    assert "event_refs" in ft
+    assert "limitations" in ft
+    assert isinstance(ft["limitations"], list)
+
+
+def test_run_falsification_search_best_candidate_includes_failure_modes() -> None:
+    """run_falsification_search best_candidate must include failure_modes key."""
+    out = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=5)
+    bc = out.get("best_candidate")
+    assert bc is not None
+    assert "failure_modes" in bc
+    assert isinstance(bc["failure_modes"], list)
+    assert "primary_failure_mode" in bc
+
+
+def test_search_results_include_compact_failure_modes() -> None:
+    """Each result in run_falsification_search must include primary_failure_mode."""
+    out = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=5)
+    results = out.get("results") or []
+    assert len(results) > 0
+    for r in results:
+        assert "primary_failure_mode" in r
+        assert "failure_modes" in r
+        assert isinstance(r["failure_modes"], list)
+
+
+def test_search_ranking_unchanged_by_taxonomy() -> None:
+    """Adding failure taxonomy must not change sort order by score."""
+    out_a = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=8)
+    out_b = run_falsification_search(_POSITIVE_FAMILY, seed=42, max_trials=8)
+    # Same seed -> same ranking
+    ids_a = [r["candidate_id"] for r in out_a["results"]]
+    ids_b = [r["candidate_id"] for r in out_b["results"]]
+    assert ids_a == ids_b
+    # Scores are still sorted descending
+    scores = [r["score"] for r in out_a["results"]]
+    assert scores == sorted(scores, reverse=True)

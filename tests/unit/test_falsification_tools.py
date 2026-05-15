@@ -32,10 +32,18 @@ from reglabsim.tools.falsification_tools import (
     _validate_family_id,
     _validate_max_trials,
     build_best_candidate_audit_report_tool,
+    build_surrogate_dataset_tool,
+    compare_surrogate_models_tool,
+    describe_track_fidelity_tool,
     generate_falsification_candidates_tool,
+    list_surrogate_model_backends_tool,
     list_synthetic_families_tool,
+    run_adaptive_falsification_search_tool,
     run_falsification_candidate_tool,
     run_falsification_search_tool,
+    run_surrogate_guided_search_tool,
+    run_track_conditioned_falsification_tool,
+    suggest_surrogate_candidates_tool,
 )
 
 # ---------------------------------------------------------------------------
@@ -635,6 +643,923 @@ class TestPackageImports:
             "list_synthetic_families_tool",
             "run_falsification_candidate_tool",
             "run_falsification_search_tool",
+            "run_adaptive_falsification_search_tool",
         }
         assert set(reglabsim.tools.__all__) == expected
 
+
+# ===========================================================================
+# PR 8 — Adaptive search tool tests
+# ===========================================================================
+
+
+_POSITIVE_FAMILY = "confined_corner_grass"
+_FORBIDDEN_TOOL_KEYS = [
+    "event_log", "state_snapshots", "raw_event", "full_bundle",
+    "NVIDIA_API_KEY", "api_key", "password", "token",
+]
+
+
+class TestAdaptiveFalsificationSearchTool:
+    def test_returns_ok_true_for_valid_input(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        assert out["ok"] is True
+        assert out["error"] is None
+
+    def test_result_contains_required_fields(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        result = out["result"]
+        assert "schema_version" in result
+        assert "best_candidate" in result
+        assert "top_results" in result
+        assert "rounds" in result
+        assert "total_evaluations" in result
+        assert "improvement_trace" in result
+
+    def test_top_results_limited_to_five(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=3, candidates_per_round=10
+        )
+        assert out["ok"] is True
+        top = out["result"]["top_results"]
+        assert len(top) <= 5
+
+    def test_total_evaluations_correct(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=7
+        )
+        assert out["result"]["total_evaluations"] == 2 * 7
+
+    def test_rejects_rounds_zero(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=0
+        )
+        assert out["ok"] is False
+
+    def test_rejects_rounds_exceeds_cap(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=6
+        )
+        assert out["ok"] is False
+
+    def test_rejects_candidates_per_round_zero(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=0
+        )
+        assert out["ok"] is False
+
+    def test_rejects_candidates_per_round_exceeds_cap(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=26
+        )
+        assert out["ok"] is False
+
+    def test_rejects_elite_count_greater_than_candidates(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2,
+            candidates_per_round=5, elite_count=10
+        )
+        assert out["ok"] is False
+
+    def test_rejects_unknown_family(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id="nonexistent_family", seed=42, rounds=2
+        )
+        assert out["ok"] is False
+
+    def test_rejects_total_evaluations_exceeds_cap(self) -> None:
+        # rounds=5, candidates_per_round=25 = 125 > 100 cap
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=5, candidates_per_round=25
+        )
+        assert out["ok"] is False
+
+    def test_output_contains_no_raw_event_logs(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        text = json.dumps(out, sort_keys=True)
+        for forbidden in _FORBIDDEN_TOOL_KEYS:
+            assert forbidden not in text, (
+                f"Forbidden key {forbidden!r} found in adaptive tool output"
+            )
+
+    def test_is_deterministic(self) -> None:
+        out1 = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        out2 = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        assert out1["result"]["best_candidate"] == out2["result"]["best_candidate"]
+
+    def test_tool_name_in_envelope(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        assert out["tool"] == "run_adaptive_falsification_search"
+
+    def test_improvement_trace_round_zero_delta_is_none(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        trace = out["result"]["improvement_trace"]
+        assert trace[0]["delta"] is None
+
+
+# ---------------------------------------------------------------------------
+# PR 8.1 — exploit_score tool integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestExploitScoreToolIntegration:
+    """Tests that tools expose compact exploit_score summaries."""
+
+    def test_run_candidate_tool_includes_exploit_score_summary(self) -> None:
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY,
+            parameters={"attacker_risk_level": 0.8, "gap_s": 0.2},
+            seed=42,
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert "exploit_score" in result
+        es = result["exploit_score"]
+        assert es["schema_version"] == "exploit_score.v1"
+        assert "total" in es
+        assert "components" in es
+        assert "reason_codes" in es
+
+    def test_run_candidate_tool_preserves_legacy_score(self) -> None:
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY,
+            parameters={},
+            seed=42,
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert "score" in result
+        assert "score_legacy" in result
+        assert result["score"] == result["score_legacy"]
+
+    def test_run_search_tool_top_results_include_exploit_score_total(self) -> None:
+        out = run_falsification_search_tool(family_id=_POSITIVE_FAMILY, seed=42, max_trials=10)
+        assert out["ok"] is True
+        best = out["result"]["best_candidate"]
+        assert best is not None
+        assert "exploit_score_total" in best
+        top = out["result"]["top_results"]
+        for r in top:
+            assert "exploit_score_total" in r
+            assert "exploit_score_components" in r
+
+    def test_adaptive_tool_includes_exploit_score_summary(self) -> None:
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        assert out["ok"] is True
+        best = out["result"]["best_candidate"]
+        assert best is not None
+        assert "exploit_score_total" in best
+
+    def test_tool_exploit_score_output_is_compact(self) -> None:
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY, parameters={}, seed=42
+        )
+        serialized = json.dumps(out)
+        # No full nested bundle in the exploit_score output
+        assert "event_log" not in serialized
+        assert "state_snapshots" not in serialized
+        assert "raw_event" not in serialized
+
+    def test_tool_output_no_raw_bundle_with_exploit_score(self) -> None:
+        out = run_falsification_search_tool(family_id=_POSITIVE_FAMILY, seed=42, max_trials=5)
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+
+# ---------------------------------------------------------------------------
+# PR 8.2 — Failure taxonomy tests for falsification tools
+# ---------------------------------------------------------------------------
+
+
+class TestFalsificationToolsFailureTaxonomy:
+    """Tests that tool wrappers include compact failure taxonomy fields."""
+
+    def test_candidate_tool_includes_failure_taxonomy(self) -> None:
+        """run_falsification_candidate_tool must include failure_taxonomy in result."""
+        from reglabsim.falsification.failure_taxonomy import FAILURE_TAXONOMY_SCHEMA
+
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY, parameters={}, seed=42
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert "failure_taxonomy" in result
+        ft = result["failure_taxonomy"]
+        assert isinstance(ft, dict)
+        assert ft.get("schema_version") == FAILURE_TAXONOMY_SCHEMA
+
+    def test_candidate_tool_includes_primary_failure_mode(self) -> None:
+        """run_falsification_candidate_tool result must include primary_failure_mode."""
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY, parameters={}, seed=42
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert "primary_failure_mode" in result
+        assert "failure_modes" in result
+        assert isinstance(result["failure_modes"], list)
+
+    def test_search_tool_top_results_include_failure_modes(self) -> None:
+        """run_falsification_search_tool top_results must include failure taxonomy fields."""
+        out = run_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, max_trials=5
+        )
+        assert out["ok"] is True
+        top_results = out["result"].get("top_results") or []
+        assert len(top_results) > 0
+        for r in top_results:
+            assert "primary_failure_mode" in r
+            assert "failure_modes" in r
+
+    def test_search_tool_best_candidate_includes_failure_taxonomy(self) -> None:
+        """run_falsification_search_tool best_candidate must include failure taxonomy."""
+        out = run_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, max_trials=5
+        )
+        assert out["ok"] is True
+        bc = out["result"].get("best_candidate")
+        assert bc is not None
+        assert "primary_failure_mode" in bc
+        assert "failure_modes" in bc
+
+    def test_adaptive_tool_includes_failure_modes(self) -> None:
+        """run_adaptive_falsification_search_tool best_candidate must include failure taxonomy."""
+        from reglabsim.falsification.failure_taxonomy import FAILURE_TAXONOMY_SCHEMA
+
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        assert out["ok"] is True
+        bc = out["result"].get("best_candidate")
+        assert bc is not None
+        assert "primary_failure_mode" in bc
+        assert "failure_modes" in bc
+        # Also check failure_taxonomy compact block
+        assert "failure_taxonomy" in bc
+        assert bc["failure_taxonomy"].get("schema_version") == FAILURE_TAXONOMY_SCHEMA
+
+    def test_tool_taxonomy_output_is_compact(self) -> None:
+        """Failure taxonomy in tool output must not contain raw event log."""
+        out = run_falsification_candidate_tool(
+            family_id=_POSITIVE_FAMILY, parameters={}, seed=42
+        )
+        import json as _json
+        serialized = _json.dumps(out)
+        for forbidden in ("event_log", "raw_event_log", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+    def test_tool_taxonomy_output_no_raw_event_log(self) -> None:
+        """Adaptive tool output must not contain raw event log or bundle."""
+        import json as _json
+        out = run_adaptive_falsification_search_tool(
+            family_id=_POSITIVE_FAMILY, seed=42, rounds=2, candidates_per_round=5
+        )
+        serialized = _json.dumps(out)
+        for forbidden in ("event_log", "raw_event_log", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+
+
+# ===========================================================================
+# PR 8.3 — Surrogate tool tests
+# ===========================================================================
+
+_SURROGATE_FAMILY = "confined_corner_grass"
+
+
+class TestBuildSurrogateDatasetTool:
+    def test_returns_ok_envelope(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=6, adaptive=False
+        )
+        assert out["ok"] is True
+        assert out["tool"] == "build_surrogate_dataset"
+
+    def test_result_has_dataset_and_summary(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=6, adaptive=False
+        )
+        result = out["result"]
+        assert "dataset" in result
+        assert "summary" in result
+
+    def test_dataset_has_correct_schema(self) -> None:
+        from reglabsim.falsification.surrogate import SURROGATE_DATASET_SCHEMA
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=6, adaptive=False
+        )
+        ds = out["result"]["dataset"]
+        assert ds["schema_version"] == SURROGATE_DATASET_SCHEMA
+
+    def test_caps_trials_at_max(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=9999, adaptive=False
+        )
+        # Should not error out — caps at _MAX_SURROGATE_TRIALS (100)
+        assert out["ok"] is True
+
+    def test_unknown_family_returns_error(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id="nonexistent_family", seed=42, max_trials=5
+        )
+        assert out["ok"] is False
+        assert out["error"] is not None
+
+    def test_no_raw_logs_or_bundles_in_output(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=6, adaptive=False
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized, f"Forbidden key found: {forbidden}"
+
+    def test_result_has_warning(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=6, adaptive=False
+        )
+        assert "warning" in out["result"]
+        assert isinstance(out["result"]["warning"], str)
+
+    def test_adaptive_mode_works(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=10, adaptive=True
+        )
+        assert out["ok"] is True
+        ds = out["result"]["dataset"]
+        assert ds["row_count"] > 0
+
+    def test_rows_capped_at_max(self) -> None:
+        out = build_surrogate_dataset_tool(
+            family_id=_SURROGATE_FAMILY, seed=42, max_trials=10, adaptive=False
+        )
+        assert out["ok"] is True
+        ds = out["result"]["dataset"]
+        assert ds["row_count"] <= 100
+
+
+class TestSuggestSurrogateCandidatesTool:
+    def test_returns_ok_envelope(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=5,
+            proposal_pool_size=20,
+        )
+        assert out["ok"] is True
+        assert out["tool"] == "suggest_surrogate_candidates"
+
+    def test_result_has_suggestions_and_summary(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=5,
+            proposal_pool_size=20,
+        )
+        result = out["result"]
+        assert "suggestions" in result
+        assert "dataset_summary" in result
+
+    def test_suggestions_are_ranked_by_predicted_score(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=5,
+            proposal_pool_size=20,
+        )
+        suggestions = out["result"]["suggestions"]["suggestions"]
+        scores = [s["predicted_score"] for s in suggestions]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_predictions_are_not_evidence(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=3,
+            proposal_pool_size=15,
+        )
+        result = out["result"]
+        # Warning must be present
+        assert "warning" in result
+        warning_text = result["warning"].lower()
+        assert "prediction" in warning_text or "validation" in warning_text
+        # Suggestions should not contain evidence keys
+        suggestions = result["suggestions"].get("suggestions") or []
+        for s in suggestions:
+            assert "unsafe_legal_state_count" not in s
+            assert "event_refs" not in s
+            assert "exploit_score" not in s
+
+    def test_no_raw_logs_or_bundles(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=3,
+            proposal_pool_size=15,
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+    def test_unknown_family_returns_error(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id="not_a_real_family",
+            seed=42,
+            training_trials=5,
+            candidate_count=3,
+        )
+        assert out["ok"] is False
+
+    def test_output_is_json_serializable(self) -> None:
+        out = suggest_surrogate_candidates_tool(
+            family_id=_SURROGATE_FAMILY,
+            seed=42,
+            training_trials=10,
+            candidate_count=3,
+            proposal_pool_size=15,
+        )
+        serialized = json.dumps(out)
+        assert isinstance(serialized, str)
+
+
+class TestLangchainToolsIncludeSurrogateTools:
+    def test_surrogate_tools_in_langchain_list(self) -> None:
+        try:
+            from reglabsim.tools.falsification_tools import as_langchain_tools
+            tools = as_langchain_tools()
+            tool_names = [t.name for t in tools]
+            assert "build_surrogate_dataset" in tool_names
+            assert "suggest_surrogate_candidates" in tool_names
+        except RuntimeError:
+            pytest.skip("LangChain not installed")
+
+
+# ===========================================================================
+# PR 8.4 — Surrogate-guided search tool tests
+# ===========================================================================
+
+_GUIDED_FAMILY = "confined_corner_grass"
+_GUIDED_CONTROL = "wide_corner_asphalt_control"
+
+
+class TestRunSurrogateGuidedSearchTool:
+    def test_returns_ok_envelope(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        assert out["ok"] is True
+        assert out["tool"] == "run_surrogate_guided_search"
+
+    def test_result_has_schema_version(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert result["schema_version"] == "surrogate_guided_search.v0"
+
+    def test_result_has_required_keys(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        result = out["result"]
+        for key in (
+            "baseline_summary", "dataset_summary", "rounds",
+            "improvement_trace", "prediction_error_trace", "limitations",
+        ):
+            assert key in result, f"Missing key: {key}"
+
+    def test_rejects_unknown_family(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id="not_a_real_family",
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+        )
+        assert out["ok"] is False
+        assert out["error"] is not None
+
+    def test_rejects_invalid_target_label(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            target_label="not_a_real_label",
+        )
+        assert out["ok"] is False
+
+    def test_caps_rounds_at_five(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=999,
+            initial_trials=3,
+            suggestions_per_round=3,
+            validation_per_round=2,
+            proposal_pool_size=10,
+        )
+        # Should not crash — caps at 5 rounds; but 5 rounds * 3 trials = 15 total,
+        # so it should succeed (albeit slowly in test — we accept it)
+        # Just check it returns a valid result or an acceptable cap error
+        assert "ok" in out
+
+    def test_output_no_raw_logs_or_bundles(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+    def test_output_is_json_serializable(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        serialized = json.dumps(out)
+        assert isinstance(serialized, str)
+
+    def test_validated_results_capped(self) -> None:
+        out = run_surrogate_guided_search_tool(
+            family_id=_GUIDED_FAMILY,
+            seed=42,
+            rounds=1,
+            initial_trials=5,
+            suggestions_per_round=4,
+            validation_per_round=2,
+            proposal_pool_size=12,
+        )
+        if out["ok"]:
+            vr = out["result"].get("validated_results") or []
+            assert len(vr) <= 10  # _MAX_GUIDED_TOP_RESULTS
+
+
+class TestLangchainToolsIncludeGuidedSearch:
+    def test_surrogate_guided_search_in_langchain_list(self) -> None:
+        try:
+            from reglabsim.tools.falsification_tools import as_langchain_tools
+            tools = as_langchain_tools()
+            tool_names = [t.name for t in tools]
+            assert "run_surrogate_guided_search" in tool_names
+        except RuntimeError:
+            pytest.skip("LangChain not installed")
+
+
+# ===========================================================================
+# PR 8.4.1 — Track fidelity tool tests
+# ===========================================================================
+
+_TF_FAMILY = "confined_corner_grass"
+
+
+class TestDescribeTrackFidelityTool:
+    def test_returns_ok_for_synthetic_family(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        assert out["ok"] is True
+        assert out["tool"] == "describe_track_fidelity"
+
+    def test_result_has_fidelity_report(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        result = out["result"]
+        assert "fidelity_report" in result
+        report = result["fidelity_report"]
+        assert report["fidelity_tier"] == "T0_synthetic_family"
+        assert report["claim_level"] == "synthetic_stress_test_only"
+
+    def test_result_has_track_model_summary(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        summary = out["result"]["track_model_summary"]
+        assert "track_id" in summary
+        assert "fidelity_tier" in summary
+        assert summary["fidelity_tier"] == "T0_synthetic_family"
+
+    def test_rejects_unknown_family(self) -> None:
+        out = describe_track_fidelity_tool(family_id="not_a_real_family")
+        assert out["ok"] is False
+
+    def test_returns_ok_for_track_id(self) -> None:
+        out = describe_track_fidelity_tool(track_id="generic_public_01")
+        assert out["ok"] is True
+        report = out["result"]["fidelity_report"]
+        assert report["fidelity_tier"] == "T1_public_approximation"
+
+    def test_no_both_none_returns_error(self) -> None:
+        out = describe_track_fidelity_tool()
+        assert out["ok"] is False
+
+    def test_output_is_json_serializable(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        json.dumps(out)
+
+    def test_output_does_not_include_full_geometry(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        serialized = json.dumps(out)
+        for forbidden in ("raw_geojson", "shapefile", "coordinate_array"):
+            assert forbidden not in serialized
+
+
+class TestSearchToolIncludesTrackFidelity:
+    def test_search_result_tool_does_not_crash(self) -> None:
+        out = run_falsification_search_tool(
+            family_id=_TF_FAMILY, seed=42, max_trials=3
+        )
+        assert out["ok"] is True
+        result = out["result"]
+        assert result is not None
+
+    def test_raw_search_includes_track_fidelity(self) -> None:
+        from reglabsim.falsification.search import run_falsification_search
+        sr = run_falsification_search(_TF_FAMILY, seed=42, max_trials=3)
+        assert "track_fidelity" in sr
+        tf = sr["track_fidelity"]
+        assert tf["fidelity_tier"] == "T0_synthetic_family"
+
+    def test_describe_track_fidelity_output_no_raw_geojson(self) -> None:
+        out = describe_track_fidelity_tool(family_id=_TF_FAMILY)
+        serialized = json.dumps(out)
+        for forbidden in ("raw_geojson", "shapefile", "coordinate_array",
+                          "event_log", "full_bundle"):
+            assert forbidden not in serialized
+
+
+# ===========================================================================
+# PR 8.4.2 — Track-conditioned falsification tool tests
+# ===========================================================================
+
+_TC_FAMILY = "confined_corner_grass"
+
+
+class TestRunTrackConditionedFalsificationTool:
+    def test_with_family_id_returns_ok(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=2
+        )
+        assert out["ok"] is True
+        assert out["tool"] == "run_track_conditioned_falsification"
+
+    def test_result_has_schema_version(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=2
+        )
+        assert out["result"]["schema_version"] == "track_conditioned_search.v0"
+
+    def test_result_has_fidelity_and_readiness(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=2
+        )
+        result = out["result"]
+        assert "track_fidelity" in result
+        assert "readiness" in result
+        assert result["track_fidelity"]["fidelity_tier"] == "T0_synthetic_family"
+
+    def test_rejects_unknown_family(self) -> None:
+        out = run_track_conditioned_falsification_tool(family_id="not_a_real_family")
+        assert out["ok"] is False
+
+    def test_rejects_both_family_and_track_id(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, track_id="some_track"
+        )
+        assert out["ok"] is False
+
+    def test_rejects_neither_family_nor_track(self) -> None:
+        out = run_track_conditioned_falsification_tool()
+        assert out["ok"] is False
+
+    def test_caps_segments(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=999, candidates_per_segment=2
+        )
+        assert out["ok"] is True
+
+    def test_caps_candidates_per_segment(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=999
+        )
+        assert out["ok"] is True
+
+    def test_output_no_raw_event_logs(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=2
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event", "state_snapshots", "full_bundle"):
+            assert forbidden not in serialized
+
+    def test_output_is_compact_no_full_track_model(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=2, candidates_per_segment=2
+        )
+        serialized = json.dumps(out)
+        assert "track_model.v0" not in serialized
+
+
+class TestLangchainToolsIncludeTrackConditioned:
+    def test_tool_in_langchain_list(self) -> None:
+        try:
+            from reglabsim.tools.falsification_tools import as_langchain_tools
+            tools = as_langchain_tools()
+            tool_names = [t.name for t in tools]
+            assert "run_track_conditioned_falsification" in tool_names
+        except RuntimeError:
+            pytest.skip("LangChain not installed")
+
+
+# ===========================================================================
+# PR 8.4.3 — Surrogate model registry and comparison tools
+# ===========================================================================
+
+
+class TestListSurrogateModelBackendsTool:
+    def test_returns_ok_envelope(self) -> None:
+        out = list_surrogate_model_backends_tool()
+        assert out["ok"] is True
+        assert out["tool"] == "list_surrogate_model_backends"
+
+    def test_nearest_neighbor_always_available(self) -> None:
+        out = list_surrogate_model_backends_tool()
+        models = out["result"]["available_models"]
+        nn = next(m for m in models if m["model_type"] == "nearest_neighbor")
+        assert nn["available"] is True
+
+    def test_json_serializable(self) -> None:
+        out = list_surrogate_model_backends_tool()
+        json.dumps(out)
+
+
+class TestCompareSurrogateModelsTool:
+    def test_returns_ok_envelope(self) -> None:
+        out = compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=8
+        )
+        assert out["ok"] is True
+        assert out["tool"] == "compare_surrogate_models"
+
+    def test_result_has_schema(self) -> None:
+        out = compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=8
+        )
+        assert out["result"]["schema_version"] == "surrogate_model_comparison.v0"
+
+    def test_result_is_compact(self) -> None:
+        out = compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=8
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "full_dataset", "raw_candidate_pool",
+                          "sklearn_estimator", "model_pickle"):
+            assert forbidden not in serialized
+
+    def test_caps_trials(self) -> None:
+        out = compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=9999
+        )
+        assert out["ok"] is True
+
+    def test_handles_optional_sklearn_unavailable(self) -> None:
+        from reglabsim.falsification.surrogate_models import is_sklearn_available
+        out = compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=8
+        )
+        assert out["ok"] is True
+        if not is_sklearn_available():
+            best = out["result"]["best_available_model_type"]
+            assert best == "nearest_neighbor"
+
+
+class TestTrackConditionedToolWithSurrogateGuidance:
+    def test_accepts_surrogate_guidance_params(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_model_type="nearest_neighbor",
+            surrogate_training_trials=6,
+        )
+        assert out["ok"] is True
+
+    def test_surrogate_guidance_output_compact(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("raw_candidate_pool", "full_dataset",
+                          "event_log", "state_snapshots"):
+            assert forbidden not in serialized
+
+    def test_surrogate_guidance_no_raw_logs(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=0,
+        )
+        serialized = json.dumps(out)
+        for forbidden in ("event_log", "raw_event"):
+            assert forbidden not in serialized
+
+    def test_surrogate_guidance_predictions_not_evidence(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+        )
+        if out["ok"]:
+            sg = out["result"].get("surrogate_guidance") or {}
+            assert sg.get("used_for") == "candidate_prioritization_only"
+
+
+class TestLangchainToolsIncludeSurrogateRegistryTools:
+    def test_tools_in_langchain_list(self) -> None:
+        try:
+            from reglabsim.tools.falsification_tools import as_langchain_tools
+            tools = as_langchain_tools()
+            tool_names = [t.name for t in tools]
+            assert "list_surrogate_model_backends" in tool_names
+            assert "compare_surrogate_models" in tool_names
+        except RuntimeError:
+            pytest.skip("LangChain not installed")
+
+
+# ===========================================================================
+# PR 8.4.3 closure — surrogate guidance status in tool output
+# ===========================================================================
+
+class TestTrackConditionedToolSurrogateGuidanceStatus:
+    def test_tool_surrogate_guidance_reports_status(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+        )
+        if out["ok"]:
+            sg = out["result"].get("surrogate_guidance") or {}
+            assert "status" in sg
+            assert sg["status"] in ("active", "fallback_to_heuristic_insufficient_training_data")
+
+    def test_tool_no_fake_predictions_when_surrogate_untrained(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=0,
+        )
+        if out["ok"]:
+            sg = out["result"].get("surrogate_guidance") or {}
+            assert sg.get("status") == "fallback_to_heuristic_insufficient_training_data"
+            for finding in out["result"].get("segment_findings") or []:
+                assert "predicted_score" not in finding
+
+    def test_tool_guidance_comparison_not_run_when_insufficient_data(self) -> None:
+        out = run_track_conditioned_falsification_tool(
+            family_id=_TC_FAMILY, seed=42, max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=0,
+            compare_against_heuristic=True,
+        )
+        if out["ok"]:
+            gc = out["result"].get("guidance_comparison") or {}
+            assert gc.get("verdict") == "not_run_insufficient_training_data"

@@ -15,6 +15,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
+from reglabsim.falsification.failure_taxonomy import build_failure_taxonomy
+from reglabsim.falsification.scoring import build_exploit_score
 from reglabsim.logging.audit_report import build_audit_report
 from reglabsim.logging.replay import ReplayEngine
 from reglabsim.runtime.microkernel import RaceMicrokernel
@@ -28,6 +30,11 @@ from reglabsim.synthetic.families import (
     build_synthetic_track_state,
     build_synthetic_weather,
 )
+from reglabsim.tracks.fidelity import (
+    build_track_fidelity_report,
+    compact_track_fidelity_summary,
+)
+from reglabsim.tracks.track_model import build_track_model_from_synthetic_family
 
 _BASE_REGULATION: dict[str, Any] = {
     "power_unit": {"ers_max_energy_mj": 6.0, "ers_deployment_max_kw": 250.0},
@@ -73,6 +80,9 @@ class FalsificationResult:
     score: float
     event_refs: list[str] = field(default_factory=list)
     bundle: dict[str, Any] | None = None
+    exploit_score: dict[str, Any] | None = None
+    failure_taxonomy: dict[str, Any] | None = None
+    track_fidelity: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +290,40 @@ def run_candidate(
 
     event_refs: list[str] = list(metrics.get("unsafe_legal_event_refs") or [])
 
+    # Build multi-objective exploit score (PR 8.1).
+    # Legacy `score` field is preserved and unchanged.
+    bundle_unsafe_events: list[dict[str, Any]] = [
+        e for e in (bundle.get("events") or [])
+        if e.get("event_type") == "unsafe_legal_state"
+    ]
+    legal_verdicts: list[dict[str, Any]] = list(bundle.get("legal_verdicts") or [])
+    exploit_score_dict = build_exploit_score(
+        metrics=metrics,
+        candidate_parameters=dict(candidate.parameters),
+        legal_verdicts=legal_verdicts if legal_verdicts else None,
+        unsafe_events=bundle_unsafe_events if bundle_unsafe_events else None,
+        patch_reruns=list(bundle.get("patch_reruns") or []) or None,
+        candidate_id=candidate.candidate_id,
+        family_id=candidate.family_id,
+        event_refs=event_refs if event_refs else None,
+        prior_findings=None,
+    )
+
+    # Build deterministic failure taxonomy (PR 8.2).
+    # Does NOT affect scoring or ranking.
+    failure_taxonomy_dict = build_failure_taxonomy(
+        metrics=metrics,
+        unsafe_events=bundle_unsafe_events if bundle_unsafe_events else None,
+        legal_verdicts=legal_verdicts if legal_verdicts else None,
+        candidate_parameters=dict(candidate.parameters),
+        patch_reruns=list(bundle.get("patch_reruns") or []) or None,
+        exploit_score=exploit_score_dict,
+    )
+
+    # Compact track fidelity metadata (PR 8.4.1).
+    # Pure metadata — does NOT affect score, ranking, safety, or legal decisions.
+    track_fidelity_dict = _build_compact_track_fidelity(candidate.family_id)
+
     return FalsificationResult(
         candidate_id=candidate.candidate_id,
         family_id=candidate.family_id,
@@ -291,6 +335,9 @@ def run_candidate(
         score=score,
         event_refs=event_refs,
         bundle=bundle if include_bundle else None,
+        exploit_score=exploit_score_dict,
+        failure_taxonomy=failure_taxonomy_dict,
+        track_fidelity=track_fidelity_dict,
     )
 
 
@@ -316,6 +363,35 @@ def score_candidate_metrics(metrics: dict[str, Any]) -> float:
         + 1.0 * mean_hazard
         + unsafe_verdict_bonus
     )
+
+
+# ---------------------------------------------------------------------------
+# Track fidelity helper
+# ---------------------------------------------------------------------------
+
+
+def _build_compact_track_fidelity(family_id: str) -> dict[str, Any]:
+    """Return compact track fidelity metadata for a synthetic family.
+
+    Always T0_synthetic_family. Does not affect scoring or ranking.
+    """
+    spec = SYNTHETIC_FAMILIES.get(family_id)
+    spec_dict: dict[str, Any] = {}
+    if spec is not None:
+        spec_dict = {
+            "family_id": spec.family_id,
+            "track_id": spec.track_id,
+            "segment_id": spec.segment_id,
+            "segment_type": spec.segment_type,
+            "width_m": spec.width_m,
+            "barrier_distance_m": spec.barrier_distance_m,
+            "runoff_type": spec.runoff_type,
+            "visibility_m": spec.visibility_m,
+            "description": spec.description,
+        }
+    track_model = build_track_model_from_synthetic_family(family_id, spec_dict)
+    report = build_track_fidelity_report(track_model)
+    return compact_track_fidelity_summary(report)
 
 
 # ---------------------------------------------------------------------------
@@ -364,14 +440,26 @@ def run_falsification_search(
             "max_hazard_score": best.max_hazard_score,
             "mean_hazard_score": best.mean_hazard_score,
             "score": best.score,
+            "score_legacy": best.score,
+            "exploit_score": best.exploit_score,
+            "failure_taxonomy": best.failure_taxonomy,
+            "failure_modes": [
+                m["mode"] for m in (best.failure_taxonomy or {}).get("failure_modes", [])
+            ],
+            "primary_failure_mode": (best.failure_taxonomy or {}).get("primary_failure_mode"),
             "event_refs": best.event_refs,
+            "track_fidelity": best.track_fidelity,
         }
+
+    # Compact track fidelity for search-level metadata
+    search_track_fidelity = _build_compact_track_fidelity(family_id)
 
     return {
         "schema_version": "falsification_search.v0",
         "family_id": family_id,
         "seed": seed,
         "max_trials": max_trials,
+        "track_fidelity": search_track_fidelity,
         "search_space": {
             name: {
                 "min_value": r.min_value,
@@ -391,6 +479,15 @@ def run_falsification_search(
                 "max_hazard_score": r.max_hazard_score,
                 "mean_hazard_score": r.mean_hazard_score,
                 "score": r.score,
+                "score_legacy": r.score,
+                "exploit_score": r.exploit_score,
+                "primary_failure_mode": (
+                    r.failure_taxonomy.get("primary_failure_mode")
+                    if r.failure_taxonomy else None
+                ),
+                "failure_modes": [
+                    m["mode"] for m in (r.failure_taxonomy or {}).get("failure_modes", [])
+                ],
                 "event_refs": r.event_refs,
                 **({"bundle": r.bundle} if include_bundles else {}),
             }

@@ -10,6 +10,7 @@ from reglabsim.tools.falsification_tools import (
     build_best_candidate_audit_report_tool,
     generate_falsification_candidates_tool,
     list_synthetic_families_tool,
+    run_adaptive_falsification_search_tool,
     run_falsification_candidate_tool,
     run_falsification_search_tool,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "build_best_candidate_audit_report_tool",
     "generate_falsification_candidates_tool",
     "list_synthetic_families_tool",
+    "run_adaptive_falsification_search_tool",
     "run_falsification_candidate_tool",
     "run_falsification_search_tool",
 ]

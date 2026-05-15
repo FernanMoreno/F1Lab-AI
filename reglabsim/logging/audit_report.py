@@ -21,7 +21,7 @@ def build_audit_report(bundle: dict[str, Any]) -> dict[str, Any]:
 
     Reads only — does not mutate the input bundle.
     """
-    return {
+    report: dict[str, Any] = {
         "schema_version": _AUDIT_SCHEMA,
         "run": _extract_run_metadata(bundle),
         "summary": _extract_summary(bundle),
@@ -29,6 +29,17 @@ def build_audit_report(bundle: dict[str, Any]) -> dict[str, Any]:
         "counterfactuals": _extract_counterfactuals(bundle),
         "limitations": list(_LIMITATIONS),
     }
+    # Include track fidelity if present in bundle (PR 8.4.1).
+    track_fid = bundle.get("track_fidelity")
+    if isinstance(track_fid, dict):
+        report["track_fidelity"] = _extract_track_fidelity_summary(track_fid)
+    # Include track-conditioned campaign summary if present (PR 8.4.2).
+    tc_result = bundle.get("track_conditioned_result")
+    if isinstance(tc_result, dict):
+        report["track_conditioned_campaign"] = _extract_track_conditioned_summary(
+            tc_result
+        )
+    return report
 
 
 def render_audit_report_markdown(report: dict[str, Any]) -> str:
@@ -167,6 +178,49 @@ def render_audit_report_markdown(report: dict[str, Any]) -> str:
                     f"- **State hash coverage:** {repro.get('state_hash_coverage', 'partial')}"
                 )
                 lines.append("")
+
+    # --- Track Fidelity ---
+    tf = report.get("track_fidelity")
+    if isinstance(tf, dict):
+        lines.append("## Track Fidelity")
+        lines.append(f"- **Track ID:** {tf.get('track_id', 'N/A')}")
+        lines.append(f"- **Fidelity tier:** {tf.get('fidelity_tier', 'N/A')}")
+        lines.append(f"- **Claim level:** {tf.get('claim_level', 'N/A')}")
+        lines.append(f"- **Data classification:** {tf.get('data_classification', 'N/A')}")
+        coverage = tf.get("coverage") or {}
+        if coverage:
+            cov_str = ", ".join(f"{k}: {v:.0%}" for k, v in list(coverage.items())[:5])
+            lines.append(f"- **Coverage:** {cov_str}")
+        gaps = tf.get("known_gaps") or []
+        if gaps:
+            lines.append(f"- **Known gaps:** {', '.join(gaps[:4])}")
+        tf_lims = tf.get("limitations") or []
+        for lim in tf_lims[:3]:
+            lines.append(f"- *{lim}*")
+        lines.append("")
+
+    # --- Track-Conditioned Campaign (PR 8.4.2) ---
+    tcc = report.get("track_conditioned_campaign")
+    if isinstance(tcc, dict):
+        lines.append("## Track-Conditioned Campaign")
+        lines.append(f"- **Track ID:** {tcc.get('track_id', 'N/A')}")
+        lines.append(f"- **Fidelity tier:** {tcc.get('fidelity_tier', 'N/A')}")
+        lines.append(f"- **Claim level:** {tcc.get('claim_level', 'N/A')}")
+        lines.append(f"- **Readiness:** {tcc.get('readiness', 'N/A')}")
+        lines.append(f"- **Segments evaluated:** {tcc.get('segments_evaluated', 0)}")
+        lines.append(
+            f"- **Total unsafe legal states:** {tcc.get('total_unsafe_legal_states', 0)}"
+        )
+        bsf = tcc.get("best_segment_finding") or {}
+        if bsf:
+            lines.append(
+                f"- **Best segment:** {bsf.get('segment_id', 'N/A')} "
+                f"(exploit={bsf.get('best_actual_exploit_score_total', 'N/A')})"
+            )
+        tcc_lims = tcc.get("limitations") or []
+        for lim in tcc_lims[:3]:
+            lines.append(f"- *{lim}*")
+        lines.append("")
 
     # --- Limitations ---
     lines.append("## Limitations")
@@ -450,3 +504,47 @@ def _compact_safety_verdict(sv: dict[str, Any]) -> dict[str, Any] | None:
         "delta_speed_kph": sv.get("delta_speed_kph"),
         "confidence": sv.get("confidence"),
     }
+
+
+def _extract_track_fidelity_summary(track_fid: dict[str, Any]) -> dict[str, Any]:
+    """Extract compact track fidelity for audit report inclusion."""
+    return {
+        "schema_version": track_fid.get("schema_version", "track_fidelity.v0"),
+        "track_id": track_fid.get("track_id"),
+        "fidelity_tier": track_fid.get("fidelity_tier"),
+        "data_classification": track_fid.get("data_classification"),
+        "claim_level": track_fid.get("claim_level"),
+        "segment_count": track_fid.get("segment_count", 0),
+        "coverage": track_fid.get("coverage", {}),
+        "known_gaps": (track_fid.get("known_gaps") or [])[:6],
+        "limitations": (track_fid.get("limitations") or [])[:4],
+    }
+
+
+def _extract_track_conditioned_summary(tc_result: dict[str, Any]) -> dict[str, Any]:
+    """Extract compact track-conditioned campaign summary for audit report."""
+    tf = tc_result.get("track_fidelity") or {}
+    rr = tc_result.get("readiness") or {}
+    summary = tc_result.get("summary") or {}
+    bsf = tc_result.get("best_segment_finding")
+
+    result: dict[str, Any] = {
+        "schema_version": tc_result.get("schema_version", "track_conditioned_search.v0"),
+        "track_id": tc_result.get("track_id"),
+        "fidelity_tier": tf.get("fidelity_tier"),
+        "claim_level": tf.get("claim_level"),
+        "readiness": rr.get("readiness"),
+        "segments_evaluated": summary.get("segments_evaluated", 0),
+        "total_unsafe_legal_states": summary.get("total_unsafe_legal_states", 0),
+        "limitations": (tc_result.get("limitations") or [])[:4],
+    }
+    if isinstance(bsf, dict):
+        result["best_segment_finding"] = {
+            "segment_id": bsf.get("segment_id"),
+            "best_candidate_id": bsf.get("best_candidate_id"),
+            "best_actual_exploit_score_total": bsf.get("best_actual_exploit_score_total"),
+            "unsafe_legal_state_count": bsf.get("unsafe_legal_state_count"),
+            "primary_failure_modes": (bsf.get("primary_failure_modes") or [])[:3],
+            "event_refs": (bsf.get("event_refs") or [])[:5],
+        }
+    return result

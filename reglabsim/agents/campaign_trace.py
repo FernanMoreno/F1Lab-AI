@@ -155,6 +155,10 @@ class CampaignFinding:
     event_refs: list[str] = field(default_factory=list)
     audit_report_ref: str | None = None
     summary: str = ""
+    exploit_score_total: float | None = None
+    exploit_score_components: dict[str, float] = field(default_factory=dict)
+    primary_failure_mode: str | None = None
+    failure_modes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -336,6 +340,14 @@ def extract_event_refs(payload: Any, limit: int = MAX_EVENT_REFS_PER_STEP) -> li
         sm = sub.get("summary") if isinstance(sub.get("summary"), dict) else None
         if isinstance(sm, dict):
             _add(sm.get("unsafe_legal_event_refs"))
+        # Adaptive search: top_results[...]["event_refs"]
+        for item in sub.get("top_results") or []:
+            if isinstance(item, dict):
+                _add(item.get("event_refs"))
+        # Adaptive search: rounds[...]["best_event_refs"]
+        for rnd in sub.get("rounds") or []:
+            if isinstance(rnd, dict):
+                _add(rnd.get("best_event_refs"))
 
     _add(payload.get("event_refs"))
     _add(payload.get("unsafe_legal_event_refs"))
@@ -384,6 +396,10 @@ def extract_candidate_ids(payload: Any, limit: int = 10) -> list[str]:
                 _add(item.get("candidate_id"))
         # Also check best_candidate_id (audit report style)
         _add(sub.get("best_candidate_id"))
+        # Adaptive search: rounds[...]["best_candidate_id"]
+        for rnd in sub.get("rounds") or []:
+            if isinstance(rnd, dict):
+                _add(rnd.get("best_candidate_id"))
 
     _add(payload.get("candidate_id"))
 
@@ -450,6 +466,8 @@ def summarize_tool_input(kwargs: dict[str, Any]) -> dict[str, Any]:
     allowed_keys = {
         "family_id", "seed", "max_trials", "candidate_id",
         "include_bundle", "parameters", "mode", "objective",
+        # PR 8 adaptive search inputs
+        "rounds", "candidates_per_round", "elite_count",
     }
     summary: dict[str, Any] = {}
     for k, v in kwargs.items():
@@ -527,12 +545,215 @@ def summarize_tool_output(output: dict[str, Any]) -> dict[str, Any]:
     bc = result.get("best_candidate")
     if isinstance(bc, dict):
         summary["best_candidate"] = _compact_nested(bc)
+        # Extract exploit_score from best_candidate
+        es = bc.get("exploit_score")
+        if isinstance(es, dict):
+            summary["exploit_score_total"] = es.get("total")
+            comps = es.get("components")
+            if isinstance(comps, dict):
+                summary["exploit_score_components"] = {
+                    k: round(float(v), 4) for k, v in comps.items()
+                    if isinstance(v, (int, float))
+                }
+            rc = es.get("reason_codes")
+            if isinstance(rc, list):
+                summary["exploit_score_reason_codes"] = rc[:6]
+        # Extract failure taxonomy from best_candidate
+        pfm = bc.get("primary_failure_mode")
+        if pfm is not None:
+            summary["primary_failure_mode"] = pfm
+        fms = bc.get("failure_modes")
+        if isinstance(fms, list):
+            summary["failure_modes"] = fms
+
+    # exploit_score at result top level (run_falsification_candidate_tool)
+    top_es = result.get("exploit_score")
+    if isinstance(top_es, dict) and "exploit_score_total" not in summary:
+        summary["exploit_score_total"] = top_es.get("total")
+        comps = top_es.get("components")
+        if isinstance(comps, dict):
+            summary["exploit_score_components"] = {
+                k: round(float(v), 4) for k, v in comps.items()
+                if isinstance(v, (int, float))
+            }
+        rc = top_es.get("reason_codes")
+        if isinstance(rc, list):
+            summary["exploit_score_reason_codes"] = rc[:6]
+
+    # Failure taxonomy at result top level
+    pfm = result.get("primary_failure_mode")
+    if pfm is not None and "primary_failure_mode" not in summary:
+        summary["primary_failure_mode"] = pfm
+    fms = result.get("failure_modes")
+    if isinstance(fms, list) and "failure_modes" not in summary:
+        summary["failure_modes"] = fms
 
     # Top results (compact, limited)
     top = result.get("top_results")
     if isinstance(top, list):
         summary["top_results_count"] = len(top)
         summary["top_results"] = [_compact_nested(r) for r in top[:3]]
+
+    # Adaptive search: rounds summary (count only) and improvement_trace
+    rounds = result.get("rounds")
+    if isinstance(rounds, list):
+        summary["round_count"] = len(rounds)
+    improvement_trace = result.get("improvement_trace")
+    if isinstance(improvement_trace, list):
+        summary["improvement_trace"] = improvement_trace[:10]
+    total_evals = result.get("total_evaluations")
+    if total_evals is not None:
+        summary["total_evaluations"] = total_evals
+
+    # Surrogate-guided search (schema_version == "surrogate_guided_search.v0")
+    schema_ver = result.get("schema_version") or ""
+    if "surrogate_guided" in schema_ver:
+        # Baseline summary
+        baseline_sm = result.get("baseline_summary")
+        if isinstance(baseline_sm, dict):
+            summary["baseline_best_exploit_score_total"] = baseline_sm.get(
+                "best_exploit_score_total"
+            )
+            summary["baseline_best_legacy_score"] = baseline_sm.get("best_legacy_score")
+            summary["baseline_initial_trials"] = baseline_sm.get("initial_trials")
+
+        # Dataset summary
+        ds_sm = result.get("dataset_summary")
+        if isinstance(ds_sm, dict):
+            summary["dataset_row_count"] = ds_sm.get("row_count")
+            summary["dataset_feature_count"] = ds_sm.get("feature_count")
+
+        # Best validated candidate
+        bvc = result.get("best_validated_candidate")
+        if isinstance(bvc, dict):
+            summary["best_validated_candidate_id"] = bvc.get("candidate_id")
+            summary["best_validated_exploit_score_total"] = bvc.get(
+                "actual_exploit_score_total"
+            )
+            summary["best_validated_unsafe_count"] = bvc.get("unsafe_legal_state_count")
+            pfm = bvc.get("primary_failure_mode")
+            if pfm:
+                summary["best_validated_primary_failure_mode"] = pfm
+            bvc_refs = bvc.get("event_refs")
+            if isinstance(bvc_refs, list) and bvc_refs:
+                summary["best_validated_event_refs"] = bvc_refs[:5]
+
+        # Prediction error trace (compact)
+        pet = result.get("prediction_error_trace")
+        if isinstance(pet, list):
+            summary["prediction_error_trace"] = pet[:5]
+
+        # Total validated count
+        tvc = result.get("total_validated_count")
+        if tvc is not None:
+            summary["total_validated_count"] = tvc
+
+    # Track fidelity compact summary (PR 8.4.1)
+    tf = result.get("track_fidelity")
+    if isinstance(tf, dict):
+        summary["track_fidelity"] = {
+            "track_id": tf.get("track_id"),
+            "fidelity_tier": tf.get("fidelity_tier"),
+            "claim_level": tf.get("claim_level"),
+            "known_gaps": (tf.get("known_gaps") or [])[:4],
+        }
+
+    # Also check best_candidate for track fidelity
+    if "track_fidelity" not in summary:
+        bc = result.get("best_candidate") or {}
+        bc_tf = bc.get("track_fidelity")
+        if isinstance(bc_tf, dict):
+            summary["track_fidelity"] = {
+                "track_id": bc_tf.get("track_id"),
+                "fidelity_tier": bc_tf.get("fidelity_tier"),
+                "claim_level": bc_tf.get("claim_level"),
+                "known_gaps": (bc_tf.get("known_gaps") or [])[:4],
+            }
+
+    # Track-conditioned search (schema_version == "track_conditioned_search.v0")
+    schema_ver2 = result.get("schema_version") or ""
+    if "track_conditioned" in schema_ver2:
+        # Track fidelity
+        tc_tf = result.get("track_fidelity")
+        if isinstance(tc_tf, dict) and "track_fidelity" not in summary:
+            summary["track_fidelity"] = {
+                "track_id": tc_tf.get("track_id"),
+                "fidelity_tier": tc_tf.get("fidelity_tier"),
+                "claim_level": tc_tf.get("claim_level"),
+            }
+
+        # Readiness
+        rr = result.get("readiness")
+        if isinstance(rr, dict):
+            summary["track_readiness"] = rr.get("readiness")
+            summary["usable_segment_count"] = rr.get("usable_segment_count")
+
+        # Selected segments (just IDs)
+        segs = result.get("selected_segments") or []
+        if segs:
+            summary["selected_segment_ids"] = [
+                str(s.get("segment_id", "")) for s in segs[:6]
+            ]
+
+        # Best segment finding
+        bsf = result.get("best_segment_finding")
+        if isinstance(bsf, dict):
+            summary["best_segment_id"] = bsf.get("segment_id")
+            summary["best_segment_candidate_id"] = bsf.get("best_candidate_id")
+            summary["best_segment_exploit_score_total"] = bsf.get(
+                "best_actual_exploit_score_total"
+            )
+            bsf_refs = bsf.get("event_refs") or []
+            if bsf_refs:
+                summary["best_segment_event_refs"] = bsf_refs[:5]
+            pfm = bsf.get("primary_failure_modes")
+            if isinstance(pfm, list) and pfm:
+                summary["best_segment_primary_failure_modes"] = pfm[:3]
+
+        # Summary totals
+        tc_summary = result.get("summary") or {}
+        if tc_summary:
+            summary["segments_evaluated"] = tc_summary.get("segments_evaluated")
+            summary["total_unsafe_legal_states"] = tc_summary.get(
+                "total_unsafe_legal_states"
+            )
+
+        # Surrogate guidance in track-conditioned result
+        sg = result.get("surrogate_guidance")
+        if isinstance(sg, dict):
+            summary["surrogate_guidance"] = {
+                "enabled": sg.get("enabled"),
+                "status": sg.get("status"),
+                "model_type": sg.get("model_type"),
+                "training_rows": sg.get("training_rows"),
+            }
+        # guidance_comparison verdict
+        gc = result.get("guidance_comparison")
+        if isinstance(gc, dict):
+            summary["guidance_comparison_verdict"] = gc.get("verdict")
+
+    # Surrogate model registry/evaluation/comparison schemas
+    schema_ver3 = result.get("schema_version") or ""
+    if "surrogate_model_registry" in schema_ver3:
+        avail = result.get("available_models") or []
+        summary["available_model_count"] = len(avail)
+        summary["available_models"] = [
+            m.get("model_type") for m in avail if m.get("available")
+        ]
+    elif "surrogate_model_evaluation" in schema_ver3:
+        summary["model_type"] = result.get("model_type")
+        summary["mean_absolute_error"] = result.get("mean_absolute_error")
+        summary["top_k_hit_rate"] = result.get("top_k_hit_rate")
+        summary["unsafe_hit_rate"] = result.get("unsafe_hit_rate")
+    elif "surrogate_model_comparison" in schema_ver3:
+        summary["best_available_model_type"] = result.get("best_available_model_type")
+        summary["ranking"] = (result.get("ranking") or [])[:5]
+        evs = result.get("evaluations") or []
+        best_mt = result.get("best_available_model_type")
+        best_ev = next((e for e in evs if e.get("model_type") == best_mt), None)
+        if best_ev:
+            summary["best_model_mae"] = best_ev.get("mean_absolute_error")
+            summary["best_model_top_k_hit_rate"] = best_ev.get("top_k_hit_rate")
 
     # Families list count
     families = result.get("families")
@@ -757,6 +978,10 @@ class CampaignTraceBuilder:
         event_refs: list[str] | None = None,
         audit_report_ref: str | None = None,
         summary: str = "",
+        exploit_score_total: float | None = None,
+        exploit_score_components: dict[str, float] | None = None,
+        primary_failure_mode: str | None = None,
+        failure_modes: list[str] | None = None,
     ) -> CampaignFinding:
         """Add a finding to the campaign trace.
 
@@ -771,6 +996,10 @@ class CampaignTraceBuilder:
             event_refs: Evidence event references.
             audit_report_ref: Reference to audit report artifact.
             summary: Compact human-readable summary.
+            exploit_score_total: Multi-objective exploit score total.
+            exploit_score_components: Per-component values.
+            primary_failure_mode: Primary failure mode ID from taxonomy.
+            failure_modes: List of failure mode IDs from taxonomy.
 
         Returns:
             The created CampaignFinding.
@@ -788,6 +1017,12 @@ class CampaignTraceBuilder:
             event_refs=list(event_refs) if event_refs else [],
             audit_report_ref=audit_report_ref,
             summary=compact_text(summary),
+            exploit_score_total=exploit_score_total,
+            exploit_score_components=(
+                dict(exploit_score_components) if exploit_score_components else {}
+            ),
+            primary_failure_mode=primary_failure_mode,
+            failure_modes=list(failure_modes) if failure_modes else [],
         )
         self._best_findings.append(finding)
         return finding

@@ -46,6 +46,7 @@ from reglabsim.agents.campaign_trace import (
 from reglabsim.tools.falsification_tools import (
     build_best_candidate_audit_report_tool,
     list_synthetic_families_tool,
+    run_adaptive_falsification_search_tool,
     run_falsification_search_tool,
 )
 
@@ -97,6 +98,11 @@ class FalsificationAgentConfig:
     top_results_limit: int = 5
     require_evidence_refs: bool = True
     allow_real_llm: bool = False
+    # PR 8 — adaptive search
+    use_adaptive_search: bool = False
+    adaptive_rounds: int = 3
+    adaptive_candidates_per_round: int = 10
+    adaptive_elite_count: int = 3
 
     def __post_init__(self) -> None:
         if self.max_iterations <= 0:
@@ -110,13 +116,19 @@ class FalsificationAgentConfig:
 
     def to_compact_dict(self) -> dict[str, Any]:
         """Return a compact, safe dict for trace agent_config."""
-        return {
+        d: dict[str, Any] = {
             "max_iterations": self.max_iterations,
             "max_trials_per_search": self.max_trials_per_search,
             "max_tool_calls": self.max_tool_calls,
             "top_results_limit": self.top_results_limit,
             "require_evidence_refs": self.require_evidence_refs,
+            "use_adaptive_search": self.use_adaptive_search,
         }
+        if self.use_adaptive_search:
+            d["adaptive_rounds"] = self.adaptive_rounds
+            d["adaptive_candidates_per_round"] = self.adaptive_candidates_per_round
+            d["adaptive_elite_count"] = self.adaptive_elite_count
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +225,31 @@ def build_falsification_agent_system_prompt(
         "- generate_falsification_candidates: generate parameter candidates\n"
         "- run_falsification_candidate: run one candidate through the microkernel\n"
         "- run_falsification_search: run a search over one family\n"
-        "- build_best_candidate_audit_report: build audit report for best candidate\n\n"
+        "- build_best_candidate_audit_report: build audit report for best candidate\n"
+        "- run_adaptive_falsification_search: multi-round adaptive mutation search\n\n"
+        "## Adaptive search guardrails\n\n"
+        "18. If adaptive search is available, you may use it to refine around "
+        "promising candidates.\n"
+        "19. Adaptive search proposes candidates only; deterministic tools and "
+        "evidence remain the source of truth.\n"
+        "20. Do not claim adaptive improvement unless the tool output shows "
+        "higher score or stronger evidence.\n\n"
+        "## Failure taxonomy guardrails\n\n"
+        "21. Report failure_modes only when present in tool output — do not "
+        "invent failure modes.\n"
+        "22. Do not use failure taxonomy as proof of real-world causality.\n"
+        "23. Failure mode labels are diagnostic categories, not calibrated "
+        "causal proof.\n\n"
         "## Output format\n\n"
         "When done, provide:\n"
         "- A concise human-readable summary\n"
         "- The best finding (family_id, candidate_id, score, event_refs)\n"
+        "- Multi-objective exploit score when available (exploit_score_total, "
+        "exploit_score_components). Do not infer missing components.\n"
+        "- Failure taxonomy when present (primary_failure_mode, failure_modes). "
+        "Omit if not in tool output.\n"
+        "- Do not claim 'best real-world exploit'. Use 'multi-objective "
+        "stress-test score' language.\n"
         "- Next hypotheses to test\n"
         "- Limitations of this run\n"
     )
@@ -615,67 +647,147 @@ def run_falsification_agent_deterministic(
     )
 
     # ---------------------------------------------------------------
-    # Step 3: Run falsification search
+    # Step 3: Run falsification search (standard or adaptive)
     # ---------------------------------------------------------------
-    search_kwargs: dict[str, Any] = {
-        "family_id": chosen_family,
-        "seed": 42,
-        "max_trials": config.max_trials_per_search,
-    }
-    search_out = run_falsification_search_tool(**search_kwargs)
-
-    search_event_refs = extract_event_refs(search_out)
-    search_candidate_ids = extract_candidate_ids(search_out)
-    search_score = extract_score(search_out)
-
-    search_tc = builder.add_tool_call(
-        tool_name="run_falsification_search_tool",
-        ok=search_out["ok"],
-        input_summary=summarize_tool_input(search_kwargs),
-        output_summary=summarize_tool_output(search_out),
-        event_refs=search_event_refs,
-        candidate_ids=search_candidate_ids,
-        score=search_score,
-    )
-
     best_candidate_id: str | None = None
     best_score: float | None = None
     best_event_refs: list[str] = []
     search_summary = "Search completed"
+    adaptive_artifact: dict[str, Any] | None = None
 
-    if search_out["ok"] and search_out["result"].get("best_candidate"):
-        bc = search_out["result"]["best_candidate"]
-        best_candidate_id = str(bc.get("candidate_id", ""))
-        best_score = float(bc.get("score", 0.0))
-        best_event_refs = list(bc.get("event_refs") or [])
-        unsafe_count = int(bc.get("unsafe_legal_state_count", 0))
-        max_hazard = bc.get("max_hazard_score")
-        search_summary = (
-            f"Best: {best_candidate_id}, score={best_score:.2f}, "
-            f"unsafe_legal={unsafe_count}, max_hazard={max_hazard}"
+    if config.use_adaptive_search:
+        # --- Adaptive branch ---
+        adaptive_kwargs: dict[str, Any] = {
+            "family_id": chosen_family,
+            "seed": 42,
+            "rounds": config.adaptive_rounds,
+            "candidates_per_round": config.adaptive_candidates_per_round,
+            "elite_count": config.adaptive_elite_count,
+        }
+        adaptive_out = run_adaptive_falsification_search_tool(**adaptive_kwargs)
+
+        adaptive_event_refs = extract_event_refs(adaptive_out)
+        adaptive_candidate_ids = extract_candidate_ids(adaptive_out)
+        adaptive_score = extract_score(adaptive_out)
+
+        adaptive_tc = builder.add_tool_call(
+            tool_name="run_adaptive_falsification_search_tool",
+            ok=adaptive_out["ok"],
+            input_summary=summarize_tool_input(adaptive_kwargs),
+            output_summary=summarize_tool_output(adaptive_out),
+            event_refs=adaptive_event_refs,
+            candidate_ids=adaptive_candidate_ids,
+            score=adaptive_score,
         )
 
-        if not search_out["ok"]:
+        if adaptive_out["ok"] and adaptive_out["result"]:
+            aresult = adaptive_out["result"]
+            bc = aresult.get("best_candidate") or {}
+            best_candidate_id = str(bc.get("candidate_id", "")) or None
+            raw_score = bc.get("score")
+            best_score = float(raw_score) if raw_score is not None else None
+            best_event_refs = list(bc.get("event_refs") or [])
+            unsafe_count = int(bc.get("unsafe_legal_state_count") or 0)
+            max_hazard = bc.get("max_hazard_score")
+            total_evals = aresult.get("total_evaluations", 0)
+            round_count = len(aresult.get("rounds") or [])
+            improvement_trace = aresult.get("improvement_trace") or []
+            search_summary = (
+                f"Adaptive search: best={best_candidate_id}, "
+                f"score={best_score}, unsafe_legal={unsafe_count}, "
+                f"max_hazard={max_hazard}, "
+                f"rounds={round_count}, total_evals={total_evals}"
+            )
+            adaptive_artifact = {
+                "schema_version": aresult.get("schema_version"),
+                "round_count": round_count,
+                "total_evaluations": total_evals,
+                "best_candidate_id": best_candidate_id,
+                "best_score": best_score,
+                "improvement_trace": improvement_trace,
+            }
+        else:
+            search_summary = (
+                f"Adaptive search failed: "
+                f"{adaptive_out.get('error', {}).get('message', 'unknown')}"
+            )
             builder.add_failed_attempt(
                 step_index=builder._step_counter,
-                tool_name="run_falsification_search_tool",
+                tool_name="run_adaptive_falsification_search_tool",
                 error_type="ToolError",
-                error_message="run_falsification_search failed",
-                input_summary=search_kwargs,
+                error_message=search_summary,
+                input_summary=adaptive_kwargs,
             )
 
-    builder.add_step(
-        phase="evaluate",
-        action="run_falsification_search",
-        observation_summary=search_summary,
-        tool_call_id=search_tc.call_id,
-        tool_name="run_falsification_search_tool",
-        tool_ok=search_out["ok"],
-        selected_family_id=chosen_family,
-        selected_candidate_id=best_candidate_id,
-        score=best_score,
-        event_refs=search_event_refs or best_event_refs,
-    )
+        builder.add_step(
+            phase="evaluate",
+            action="run_adaptive_falsification_search",
+            observation_summary=search_summary,
+            tool_call_id=adaptive_tc.call_id,
+            tool_name="run_adaptive_falsification_search_tool",
+            tool_ok=adaptive_out["ok"],
+            selected_family_id=chosen_family,
+            selected_candidate_id=best_candidate_id,
+            score=best_score,
+            event_refs=adaptive_event_refs or best_event_refs,
+        )
+
+    else:
+        # --- Standard (non-adaptive) branch ---
+        search_kwargs: dict[str, Any] = {
+            "family_id": chosen_family,
+            "seed": 42,
+            "max_trials": config.max_trials_per_search,
+        }
+        search_out = run_falsification_search_tool(**search_kwargs)
+
+        search_event_refs = extract_event_refs(search_out)
+        search_candidate_ids = extract_candidate_ids(search_out)
+        search_score = extract_score(search_out)
+
+        search_tc = builder.add_tool_call(
+            tool_name="run_falsification_search_tool",
+            ok=search_out["ok"],
+            input_summary=summarize_tool_input(search_kwargs),
+            output_summary=summarize_tool_output(search_out),
+            event_refs=search_event_refs,
+            candidate_ids=search_candidate_ids,
+            score=search_score,
+        )
+
+        if search_out["ok"] and search_out["result"].get("best_candidate"):
+            bc = search_out["result"]["best_candidate"]
+            best_candidate_id = str(bc.get("candidate_id", ""))
+            best_score = float(bc.get("score", 0.0))
+            best_event_refs = list(bc.get("event_refs") or [])
+            unsafe_count = int(bc.get("unsafe_legal_state_count", 0))
+            max_hazard = bc.get("max_hazard_score")
+            search_summary = (
+                f"Best: {best_candidate_id}, score={best_score:.2f}, "
+                f"unsafe_legal={unsafe_count}, max_hazard={max_hazard}"
+            )
+
+            if not search_out["ok"]:
+                builder.add_failed_attempt(
+                    step_index=builder._step_counter,
+                    tool_name="run_falsification_search_tool",
+                    error_type="ToolError",
+                    error_message="run_falsification_search failed",
+                    input_summary=search_kwargs,
+                )
+
+        builder.add_step(
+            phase="evaluate",
+            action="run_falsification_search",
+            observation_summary=search_summary,
+            tool_call_id=search_tc.call_id,
+            tool_name="run_falsification_search_tool",
+            tool_ok=search_out["ok"],
+            selected_family_id=chosen_family,
+            selected_candidate_id=best_candidate_id,
+            score=best_score,
+            event_refs=search_event_refs or best_event_refs,
+        )
 
     # ---------------------------------------------------------------
     # Step 4: Build audit report for best candidate
@@ -753,13 +865,69 @@ def run_falsification_agent_deterministic(
     # Step 5: Summary
     # ---------------------------------------------------------------
     exploit_found = unsafe_legal_count > 0 or bool(best_event_refs)
-    if exploit_found:
+    if exploit_found and config.use_adaptive_search:
+        total_evals = (
+            adaptive_artifact.get("total_evaluations", 0)
+            if adaptive_artifact
+            else 0
+        )
+        round_count_str = (
+            str(adaptive_artifact.get("round_count", config.adaptive_rounds))
+            if adaptive_artifact
+            else str(config.adaptive_rounds)
+        )
+        summary = (
+            f"Adaptive deterministic campaign found unsafe legal evidence in family "
+            f"'{chosen_family}'. Best candidate {best_candidate_id} scored "
+            f"{best_score} after {round_count_str} rounds / {total_evals} evaluations. "
+            f"This is a deterministic stress-test finding, not a calibrated "
+            f"regulatory recommendation."
+        )
+    elif exploit_found:
+        # Extract exploit_score_total for summary from search result
+        # (best_finding is built after the summary block)
+        _es_total_for_summary: float | None = None
+        _es_components_for_summary: dict[str, Any] | None = None
+        _es_source: dict[str, Any] | None = None
+        if config.use_adaptive_search and adaptive_artifact:
+            _es_source = adaptive_artifact.get("best_candidate")
+        else:
+            _non_adaptive_out: dict[str, Any] = locals().get("search_out") or {}
+            if _non_adaptive_out.get("ok"):
+                _non_adaptive_res = _non_adaptive_out.get("result") or {}
+                _es_source = _non_adaptive_res.get("best_candidate")
+        if isinstance(_es_source, dict):
+            _es_dict = _es_source.get("exploit_score")
+            if isinstance(_es_dict, dict):
+                _es_total_for_summary = _es_dict.get("total")
+                _es_components_for_summary = _es_dict.get("components")
+            elif _es_source.get("exploit_score_total") is not None:
+                _es_total_for_summary = _es_source.get("exploit_score_total")
+                _es_components_for_summary = _es_source.get("exploit_score_components")
+
+        _exploit_score_line = ""
+        if _es_total_for_summary is not None:
+            _exploit_score_line = (
+                f" Multi-objective stress-test score: {_es_total_for_summary:.4f}."
+            )
+            if isinstance(_es_components_for_summary, dict):
+                sr = _es_components_for_summary.get("safety_risk", 0)
+                le = _es_components_for_summary.get("legal_exploit", 0)
+                ca = _es_components_for_summary.get("competitive_advantage", 0)
+                _exploit_score_line += (
+                    f" Key components: safety_risk={sr:.2f},"
+                    f" legal_exploit={le:.2f},"
+                    f" competitive_advantage={ca:.2f} (proxy)."
+                )
+
         summary = (
             f"Deterministic campaign found unsafe legal evidence in family "
-            f"'{chosen_family}'. Best candidate {best_candidate_id} scored "
-            f"{best_score:.2f} with {unsafe_legal_count} unsafe legal state(s) "
-            f"and max hazard {audit_max_hazard}. This is a deterministic "
-            f"stress-test finding, not a calibrated regulatory recommendation."
+            f"'{chosen_family}'. Best candidate {best_candidate_id} produced "
+            f"{unsafe_legal_count} unsafe legal state(s) with max hazard "
+            f"{audit_max_hazard} (legacy score={best_score:.2f})."
+            f"{_exploit_score_line}"
+            f" This is a deterministic stress-test finding, not a calibrated "
+            f"regulatory recommendation."
         )
     else:
         summary = (
@@ -781,6 +949,22 @@ def run_falsification_agent_deterministic(
         merged_refs = list(
             dict.fromkeys(best_event_refs + audit_event_refs_final)
         )
+        # Extract failure taxonomy from search result
+        _primary_failure_mode_for_finding: str | None = None
+        _failure_modes_for_finding: list[str] = []
+        _ft_source: dict[str, Any] | None = None
+        if config.use_adaptive_search and adaptive_artifact:
+            _ft_source = adaptive_artifact.get("best_candidate")
+        elif not config.use_adaptive_search:
+            _non_adaptive_search_out_ft: dict[str, Any] = locals().get("search_out") or {}
+            if _non_adaptive_search_out_ft.get("ok"):
+                _non_adaptive_result_ft = _non_adaptive_search_out_ft.get("result") or {}
+                _ft_source = _non_adaptive_result_ft.get("best_candidate")
+        if isinstance(_ft_source, dict):
+            _primary_failure_mode_for_finding = _ft_source.get("primary_failure_mode")
+            _fms = _ft_source.get("failure_modes")
+            if isinstance(_fms, list):
+                _failure_modes_for_finding = list(_fms)
         builder.add_finding(
             family_id=chosen_family,
             candidate_id=best_candidate_id,
@@ -796,6 +980,8 @@ def run_falsification_agent_deterministic(
                 f"unsafe_count={unsafe_legal_count}, "
                 f"max_hazard={audit_max_hazard}"
             ),
+            primary_failure_mode=_primary_failure_mode_for_finding,
+            failure_modes=_failure_modes_for_finding if _failure_modes_for_finding else None,
         )
 
     # ---------------------------------------------------------------
@@ -815,6 +1001,9 @@ def run_falsification_agent_deterministic(
         [artifact_audit],
     )
 
+    if adaptive_artifact is not None:
+        builder.set_artifact("adaptive_search", adaptive_artifact)
+
     candidate_refs: list[dict[str, Any]] = []
     if best_candidate_id is not None:
         candidate_refs.append(
@@ -830,9 +1019,21 @@ def run_falsification_agent_deterministic(
     # ---------------------------------------------------------------
     # Limitations (Task 12)
     # ---------------------------------------------------------------
-    builder.add_limitation(
-        f"Only {config.max_trials_per_search} trials were explored per family."
-    )
+    if config.use_adaptive_search:
+        builder.add_limitation(
+            f"Adaptive search ran {config.adaptive_rounds} rounds x "
+            f"{config.adaptive_candidates_per_round} candidates per round."
+        )
+        builder.add_limitation(
+            "Adaptive mutation is a heuristic search policy, not a learned model."
+        )
+        builder.add_limitation(
+            "Adaptive search proposes candidates only; runtime/oracles determine evidence."
+        )
+    else:
+        builder.add_limitation(
+            f"Only {config.max_trials_per_search} trials were explored per family."
+        )
     builder.add_limitation(
         "Only one synthetic family was tested in this campaign."
     )
@@ -861,6 +1062,25 @@ def run_falsification_agent_deterministic(
         for h in hypotheses
     ]
 
+    # Adaptive-specific hypothesis
+    if config.use_adaptive_search and exploit_found and adaptive_artifact:
+        next_hypotheses_output.append({
+            "hypothesis_id": f"hyp_adaptive_{len(next_hypotheses_output):04d}",
+            "basis": (
+                f"Adaptive search refined to best candidate "
+                f"{best_candidate_id} over "
+                f"{adaptive_artifact.get('round_count', '?')} rounds."
+            ),
+            "proposed_action": (
+                "Run patch comparison against best adaptive candidate "
+                "to identify regulatory interventions."
+            ),
+            "expected_signal": (
+                "mitigated/improved_hazard/worse patch verdicts vs baseline."
+            ),
+            "priority": "high",
+        })
+
     # Build top-level best_finding dict
     best_finding: dict[str, Any] | None = None
     if best_candidate_id is not None:
@@ -868,10 +1088,39 @@ def run_falsification_agent_deterministic(
             "family_id": chosen_family,
             "candidate_id": best_candidate_id,
             "score": best_score,
+            "score_legacy": best_score,
             "unsafe_legal_state_count": unsafe_legal_count,
             "max_hazard_score": audit_max_hazard,
             "event_refs": best_event_refs or audit_event_refs_final,
         }
+        # Include compact exploit_score from search result if available
+        _search_result_for_exploit: dict[str, Any] | None = None
+        if config.use_adaptive_search and adaptive_artifact:
+            _search_result_for_exploit = adaptive_artifact.get("best_candidate")
+        elif not config.use_adaptive_search:
+            _non_adaptive_search_out: dict[str, Any] = locals().get("search_out") or {}
+            if _non_adaptive_search_out.get("ok"):
+                _non_adaptive_result = _non_adaptive_search_out.get("result") or {}
+                _search_result_for_exploit = _non_adaptive_result.get("best_candidate")
+        if isinstance(_search_result_for_exploit, dict):
+            es = _search_result_for_exploit.get("exploit_score")
+            if isinstance(es, dict):
+                best_finding["exploit_score_total"] = es.get("total")
+                best_finding["exploit_score_components"] = es.get("components")
+            elif _search_result_for_exploit.get("exploit_score_total") is not None:
+                best_finding["exploit_score_total"] = _search_result_for_exploit.get(
+                    "exploit_score_total"
+                )
+                best_finding["exploit_score_components"] = _search_result_for_exploit.get(
+                    "exploit_score_components"
+                )
+            # Include failure taxonomy fields from best candidate
+            pfm = _search_result_for_exploit.get("primary_failure_mode")
+            if pfm is not None:
+                best_finding["primary_failure_mode"] = pfm
+            fms = _search_result_for_exploit.get("failure_modes")
+            if isinstance(fms, list):
+                best_finding["failure_modes"] = fms
 
     trace_dict = campaign_trace_to_dict(trace)
 

@@ -888,3 +888,308 @@ def test_run_nvidia_falsification_agent_manual() -> None:
     assert result["schema_version"] == "falsification_agent.v0"
     assert isinstance(result["campaign_trace"], dict)
     assert "steps" in result["campaign_trace"]
+
+
+# ===========================================================================
+# 20. PR 8 — Adaptive search agent integration tests
+# ===========================================================================
+
+_ADAPTIVE_FORBIDDEN = [
+    "event_log", "state_snapshots", "raw_event", "full_bundle",
+    "NVIDIA_API_KEY", "api_key", "password", "token",
+]
+
+
+class TestAdaptiveFalsificationAgent:
+    """Tests for adaptive mode in run_falsification_agent_deterministic."""
+
+    def test_agent_config_adaptive_defaults_disabled(self) -> None:
+        cfg = FalsificationAgentConfig()
+        assert cfg.use_adaptive_search is False
+
+    def test_agent_config_adaptive_fields_have_safe_defaults(self) -> None:
+        cfg = FalsificationAgentConfig()
+        assert cfg.adaptive_rounds == 3
+        assert cfg.adaptive_candidates_per_round == 10
+        assert cfg.adaptive_elite_count == 3
+
+    def test_deterministic_runner_non_adaptive_behavior_still_works(self) -> None:
+        config = FalsificationAgentConfig(
+            max_trials_per_search=5, use_adaptive_search=False
+        )
+        result = run_falsification_agent_deterministic(
+            "Test non-adaptive unchanged behavior", config=config
+        )
+        assert result["ok"] is True
+        assert result["mode"] == "deterministic_falsification_agent"
+        assert "campaign_trace" in result
+        assert "steps" in result["campaign_trace"]
+
+    def test_deterministic_runner_adaptive_mode_records_adaptive_tool_call(
+        self,
+    ) -> None:
+        config = FalsificationAgentConfig(
+            use_adaptive_search=True,
+            adaptive_rounds=2,
+            adaptive_candidates_per_round=5,
+            adaptive_elite_count=2,
+        )
+        result = run_falsification_agent_deterministic(
+            "Find unsafe scenarios using adaptive search", config=config
+        )
+        assert result["ok"] is True
+        tool_calls = result["campaign_trace"].get("tool_calls", [])
+        tool_names = [tc.get("tool_name") for tc in tool_calls]
+        assert "run_adaptive_falsification_search_tool" in tool_names, (
+            f"Expected run_adaptive_falsification_search_tool in tool_calls, "
+            f"got {tool_names}"
+        )
+
+    def test_deterministic_runner_adaptive_mode_returns_best_finding(self) -> None:
+        config = FalsificationAgentConfig(
+            use_adaptive_search=True,
+            adaptive_rounds=2,
+            adaptive_candidates_per_round=8,
+            adaptive_elite_count=2,
+        )
+        result = run_falsification_agent_deterministic(
+            "Adaptive falsification search", config=config
+        )
+        assert result["ok"] is True
+        best = result.get("best_finding")
+        assert best is not None
+        assert "candidate_id" in best
+
+    def test_deterministic_runner_adaptive_mode_artifacts_include_adaptive_search(
+        self,
+    ) -> None:
+        config = FalsificationAgentConfig(
+            use_adaptive_search=True,
+            adaptive_rounds=2,
+            adaptive_candidates_per_round=5,
+        )
+        result = run_falsification_agent_deterministic(
+            "Adaptive artifact test", config=config
+        )
+        assert result["ok"] is True
+        artifacts = result["campaign_trace"].get("artifacts", {})
+        assert "adaptive_search" in artifacts, (
+            f"Expected 'adaptive_search' in artifacts, got keys: {list(artifacts.keys())}"
+        )
+        adaptive_art = artifacts["adaptive_search"]
+        assert "round_count" in adaptive_art
+        assert "total_evaluations" in adaptive_art
+        assert "improvement_trace" in adaptive_art
+
+    def test_deterministic_runner_adaptive_trace_is_compact(self) -> None:
+        config = FalsificationAgentConfig(
+            use_adaptive_search=True,
+            adaptive_rounds=2,
+            adaptive_candidates_per_round=5,
+        )
+        result = run_falsification_agent_deterministic(
+            "Compact trace test", config=config
+        )
+        text = json.dumps(result, sort_keys=True)
+        for forbidden in _ADAPTIVE_FORBIDDEN:
+            assert forbidden not in text, (
+                f"Forbidden key {forbidden!r} found in adaptive agent output"
+            )
+
+    def test_system_prompt_mentions_adaptive_search_guardrails(self) -> None:
+        config = FalsificationAgentConfig()
+        prompt = build_falsification_agent_system_prompt(config)
+        prompt_lower = prompt.lower()
+        assert "adaptive search" in prompt_lower
+        assert "source of truth" in prompt_lower
+        assert "do not claim" in prompt_lower or "not claim" in prompt_lower
+
+    def test_compact_dict_includes_adaptive_fields_when_enabled(self) -> None:
+        config = FalsificationAgentConfig(
+            use_adaptive_search=True,
+            adaptive_rounds=4,
+            adaptive_candidates_per_round=8,
+        )
+        d = config.to_compact_dict()
+        assert d["use_adaptive_search"] is True
+        assert d["adaptive_rounds"] == 4
+        assert d["adaptive_candidates_per_round"] == 8
+
+    def test_compact_dict_excludes_adaptive_fields_when_disabled(self) -> None:
+        config = FalsificationAgentConfig(use_adaptive_search=False)
+        d = config.to_compact_dict()
+        assert d["use_adaptive_search"] is False
+        assert "adaptive_rounds" not in d
+
+
+# ---------------------------------------------------------------------------
+# PR 8.1 — exploit_score agent integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestExploitScoreAgentIntegration:
+    """Tests that agent deterministic runner exposes exploit_score in output."""
+
+    def test_deterministic_agent_best_finding_includes_score_legacy(self) -> None:
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+        config = FalsificationAgentConfig(max_trials_per_search=10)
+        result = run_falsification_agent_deterministic(
+            "Find unsafe scenarios", config=config
+        )
+        bf = result.get("best_finding")
+        if bf is not None:
+            assert "score" in bf
+            assert "score_legacy" in bf
+            assert bf["score"] == bf["score_legacy"]
+
+    def test_deterministic_agent_best_finding_exploit_score_fields(self) -> None:
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+        config = FalsificationAgentConfig(max_trials_per_search=10)
+        result = run_falsification_agent_deterministic(
+            "Find unsafe scenarios", config=config
+        )
+        bf = result.get("best_finding")
+        if bf is not None and bf.get("exploit_score_total") is not None:
+            assert isinstance(bf["exploit_score_total"], float)
+            comps = bf.get("exploit_score_components")
+            if comps is not None:
+                for key in ("safety_risk", "legal_exploit", "competitive_advantage",
+                            "patch_resistance", "novelty"):
+                    assert key in comps
+
+    def test_agent_summary_mentions_stress_test_not_best_exploit(self) -> None:
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+        config = FalsificationAgentConfig(max_trials_per_search=10)
+        result = run_falsification_agent_deterministic(
+            "Find unsafe scenarios", config=config
+        )
+        summary = result.get("summary", "").lower()
+        # Must not overclaim
+        assert "best real-world exploit" not in summary
+        assert "proven" not in summary
+        # Must mention stress-test or deterministic
+        assert "stress-test" in summary or "deterministic" in summary
+
+    def test_adaptive_agent_best_finding_score_preserved(self) -> None:
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+        config = FalsificationAgentConfig(
+            max_trials_per_search=10,
+            use_adaptive_search=True,
+            adaptive_rounds=2,
+            adaptive_candidates_per_round=5,
+        )
+        result = run_falsification_agent_deterministic(
+            "Adaptive exploit search", config=config
+        )
+        bf = result.get("best_finding")
+        if bf is not None:
+            assert "score" in bf
+            assert "score_legacy" in bf
+
+
+# ---------------------------------------------------------------------------
+# PR 8.2 — Failure taxonomy tests for falsification agent
+# ---------------------------------------------------------------------------
+
+
+class TestFalsificationAgentFailureTaxonomy:
+    """Tests that the deterministic agent exposes failure taxonomy correctly."""
+
+    def test_agent_best_finding_includes_primary_failure_mode(self) -> None:
+        """Agent best_finding must include primary_failure_mode when evidence exists."""
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+
+        config = FalsificationAgentConfig(max_trials_per_search=10)
+        result = run_falsification_agent_deterministic(
+            "Find unsafe legal scenarios with failure taxonomy", config=config
+        )
+        assert result["ok"] is True
+        bf = result.get("best_finding")
+        if bf is not None and bf.get("unsafe_legal_state_count", 0) > 0:
+            # When evidence found, failure_modes must be present
+            assert "failure_modes" in bf
+            assert isinstance(bf["failure_modes"], list)
+
+    def test_agent_campaign_trace_finding_has_failure_modes(self) -> None:
+        """Campaign trace best_findings must include failure_modes when taxonomy detected."""
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+
+        config = FalsificationAgentConfig(max_trials_per_search=10)
+        result = run_falsification_agent_deterministic(
+            "Taxonomy in campaign trace", config=config
+        )
+        trace = result.get("campaign_trace") or {}
+        findings = trace.get("best_findings") or []
+        if findings:
+            f = findings[0]
+            # Must have these fields (may be None/empty if no unsafe events)
+            assert "primary_failure_mode" in f
+            assert "failure_modes" in f
+
+    def test_agent_summary_does_not_overclaim_failure_modes(self) -> None:
+        """Agent summary must not use 'proven' or 'calibrated causal' language."""
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+
+        config = FalsificationAgentConfig(max_trials_per_search=5)
+        result = run_falsification_agent_deterministic(
+            "Taxonomy overclaiming test", config=config
+        )
+        summary = result.get("summary", "").lower()
+        # Must not overclaim causality
+        assert "calibrated causal proof" not in summary
+        assert "proven real-world" not in summary
+
+    def test_agent_does_not_invent_failure_modes_when_absent(self) -> None:
+        """Agent best_finding failure_modes must be a list or None (not invented strings)."""
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            run_falsification_agent_deterministic,
+        )
+
+        config = FalsificationAgentConfig(max_trials_per_search=5)
+        result = run_falsification_agent_deterministic(
+            "No failure mode test", config=config
+        )
+        bf = result.get("best_finding")
+        if bf is not None:
+            # failure_modes must be a list (possibly empty)
+            fms = bf.get("failure_modes")
+            if fms is not None:
+                assert isinstance(fms, list)
+            # primary_failure_mode must be a string or None
+            pfm = bf.get("primary_failure_mode")
+            assert pfm is None or isinstance(pfm, str)
+
+    def test_agent_system_prompt_includes_taxonomy_rules(self) -> None:
+        """System prompt must include failure taxonomy guardrails."""
+        from reglabsim.agents.falsification_agent import (
+            FalsificationAgentConfig,
+            build_falsification_agent_system_prompt,
+        )
+
+        config = FalsificationAgentConfig()
+        prompt = build_falsification_agent_system_prompt(config)
+        # Must include rules about not inventing failure modes
+        assert "failure_modes" in prompt or "failure mode" in prompt.lower()
+        assert "do not" in prompt.lower() or "not invent" in prompt.lower()

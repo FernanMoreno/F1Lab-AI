@@ -483,3 +483,79 @@ def test_audit_report_integration_from_paired_patch_replay() -> None:
     md = render_audit_report_markdown(report)
     for claim in _FORBIDDEN_CLAIMS:
         assert claim.lower() not in md.lower()
+
+
+# ===========================================================================
+# PR 8.4.2 — Track-conditioned audit report tests
+# ===========================================================================
+
+
+def _make_tc_bundle() -> dict[str, Any]:
+    from reglabsim.falsification.track_conditioned_search import (
+        TrackConditionedSearchConfig,
+        run_track_conditioned_falsification,
+    )
+    from reglabsim.synthetic.families import SYNTHETIC_FAMILIES
+    from reglabsim.tracks.track_model import build_track_model_from_synthetic_family
+
+    family_id = "confined_corner_grass"
+    spec = SYNTHETIC_FAMILIES.get(family_id)
+    spec_dict: dict[str, Any] = {}
+    if spec:
+        spec_dict = {
+            "family_id": spec.family_id,
+            "track_id": spec.track_id,
+            "segment_id": spec.segment_id,
+            "segment_type": spec.segment_type,
+            "width_m": spec.width_m,
+            "barrier_distance_m": spec.barrier_distance_m,
+            "runoff_type": spec.runoff_type,
+        }
+    track = build_track_model_from_synthetic_family(family_id, spec_dict)
+    config = TrackConditionedSearchConfig(seed=42, max_segments=1, candidates_per_segment=2)
+    tc_result = run_track_conditioned_falsification(track, config=config)
+    # Bundle with embedded track-conditioned result
+    return {
+        "run_id": "tc_test_001",
+        "track_conditioned_result": tc_result,
+    }
+
+
+def test_audit_report_includes_track_conditioned_section_when_present() -> None:
+    bundle = _make_tc_bundle()
+    report = build_audit_report(bundle)
+    assert "track_conditioned_campaign" in report
+    tcc = report["track_conditioned_campaign"]
+    assert "schema_version" in tcc
+    assert "track_id" in tcc
+
+
+def test_audit_report_track_conditioned_section_mentions_fidelity_tier() -> None:
+    bundle = _make_tc_bundle()
+    report = build_audit_report(bundle)
+    tcc = report["track_conditioned_campaign"]
+    assert tcc["fidelity_tier"] == "T0_synthetic_family"
+
+
+def test_audit_report_track_conditioned_section_mentions_readiness() -> None:
+    bundle = _make_tc_bundle()
+    report = build_audit_report(bundle)
+    tcc = report["track_conditioned_campaign"]
+    assert "readiness" in tcc
+    assert tcc["readiness"] in ("ready", "partial", "insufficient")
+
+
+def test_audit_report_track_conditioned_does_not_overclaim_digital_twin() -> None:
+    bundle = _make_tc_bundle()
+    report = build_audit_report(bundle)
+    md = render_audit_report_markdown(report)
+    for phrase in ("precise digital twin", "exact recreation", "guaranteed unsafe"):
+        assert phrase.lower() not in md.lower(), f"Overclaim found: {phrase}"
+
+
+def test_audit_report_track_conditioned_does_not_claim_real_world_proof() -> None:
+    bundle = _make_tc_bundle()
+    report = build_audit_report(bundle)
+    md = render_audit_report_markdown(report)
+    for phrase in ("proven real-world exploit", "real f1 proof"):
+        assert phrase.lower() not in md.lower(), f"Overclaim found: {phrase}"

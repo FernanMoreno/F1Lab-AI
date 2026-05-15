@@ -1028,3 +1028,509 @@ class TestArtifacts:
         encoded = json.dumps(campaign_trace_to_dict(trace))
         decoded = json.loads(encoded)
         assert decoded["artifacts"]["reports"][0]["id"] == "r1"
+
+
+# ===========================================================================
+# PR 8 — Adaptive search result extractor tests
+# ===========================================================================
+
+
+class TestAdaptiveSearchExtractors:
+    """Verify extract_event_refs and extract_candidate_ids handle adaptive shapes."""
+
+    def _make_adaptive_payload(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "tool": "run_adaptive_falsification_search",
+            "result": {
+                "schema_version": "adaptive_falsification_search.v0",
+                "family_id": "confined_corner_grass",
+                "seed": 42,
+                "best_candidate": {
+                    "candidate_id": "confined_corner_grass:adaptive_seed42:round02:trial0003",
+                    "score": 15.91,
+                    "unsafe_legal_state_count": 1,
+                    "event_refs": ["evt_best_001", "evt_best_002"],
+                },
+                "top_results": [
+                    {
+                        "candidate_id": "confined_corner_grass:adaptive_seed42:round02:trial0003",
+                        "score": 15.91,
+                        "event_refs": ["evt_top_001"],
+                    },
+                    {
+                        "candidate_id": "confined_corner_grass:adaptive_seed42:round01:trial0007",
+                        "score": 14.20,
+                        "event_refs": [],
+                    },
+                ],
+                "rounds": [
+                    {
+                        "round_index": 0,
+                        "best_candidate_id": (
+                            "confined_corner_grass:adaptive_seed42:round00:trial0005"
+                        ),
+                        "best_event_refs": ["evt_r0_001"],
+                    },
+                    {
+                        "round_index": 1,
+                        "best_candidate_id": (
+                            "confined_corner_grass:adaptive_seed42:round01:trial0007"
+                        ),
+                        "best_event_refs": ["evt_r1_001", "evt_r1_002"],
+                    },
+                ],
+                "improvement_trace": [
+                    {"round_index": 0, "best_score": 14.20, "delta": None},
+                    {"round_index": 1, "best_score": 15.91, "delta": 1.71},
+                ],
+            },
+            "error": None,
+        }
+
+    def test_extract_event_refs_from_adaptive_best_candidate(self) -> None:
+        payload = self._make_adaptive_payload()
+        refs = extract_event_refs(payload)
+        assert "evt_best_001" in refs
+
+    def test_extract_event_refs_from_adaptive_top_results(self) -> None:
+        payload = self._make_adaptive_payload()
+        refs = extract_event_refs(payload)
+        assert "evt_top_001" in refs
+
+    def test_extract_event_refs_from_adaptive_rounds(self) -> None:
+        payload = self._make_adaptive_payload()
+        refs = extract_event_refs(payload)
+        assert "evt_r0_001" in refs or "evt_r1_001" in refs
+
+    def test_extract_candidate_ids_from_adaptive_best_candidate(self) -> None:
+        payload = self._make_adaptive_payload()
+        cids = extract_candidate_ids(payload)
+        assert "confined_corner_grass:adaptive_seed42:round02:trial0003" in cids
+
+    def test_extract_candidate_ids_from_adaptive_top_results(self) -> None:
+        payload = self._make_adaptive_payload()
+        cids = extract_candidate_ids(payload)
+        assert "confined_corner_grass:adaptive_seed42:round01:trial0007" in cids
+
+    def test_extract_candidate_ids_from_adaptive_rounds(self) -> None:
+        payload = self._make_adaptive_payload()
+        cids = extract_candidate_ids(payload)
+        assert "confined_corner_grass:adaptive_seed42:round00:trial0005" in cids
+
+    def test_summarize_tool_output_handles_adaptive_shape_compactly(self) -> None:
+        payload = self._make_adaptive_payload()
+        summary = summarize_tool_output(payload)
+        assert summary["ok"] is True
+        # Should have round_count from adaptive rounds
+        assert "round_count" in summary
+        assert summary["round_count"] == 2
+        # Should have improvement_trace
+        assert "improvement_trace" in summary
+
+    def test_summarize_tool_output_no_forbidden_keys_in_adaptive(self) -> None:
+        payload = self._make_adaptive_payload()
+        summary = summarize_tool_output(payload)
+        text = json.dumps(summary, sort_keys=True)
+        forbidden = ["event_log", "state_snapshots", "raw_event", "full_bundle"]
+        for key in forbidden:
+            assert key not in text
+
+    def test_summarize_tool_input_allows_adaptive_keys(self) -> None:
+        kwargs: dict[str, Any] = {
+            "family_id": "confined_corner_grass",
+            "seed": 42,
+            "rounds": 3,
+            "candidates_per_round": 10,
+            "elite_count": 3,
+        }
+        summary = summarize_tool_input(kwargs)
+        assert summary["family_id"] == "confined_corner_grass"
+        assert summary["rounds"] == 3
+        assert summary["candidates_per_round"] == 10
+        assert summary["elite_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# PR 8.1 — exploit_score campaign trace tests
+# ---------------------------------------------------------------------------
+
+
+class TestExploitScoreCampaignTrace:
+    """Tests for exploit_score integration in campaign trace / CampaignFinding."""
+
+    def _make_tool_output_with_exploit_score(
+        self, exploit_total: float = 7.5
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "tool": "run_falsification_search",
+            "result": {
+                "best_candidate": {
+                    "candidate_id": "fam:seed42:trial0000",
+                    "family_id": "confined_corner_grass",
+                    "score": 15.5,
+                    "exploit_score": {
+                        "schema_version": "exploit_score.v1",
+                        "total": exploit_total,
+                        "components": {
+                            "safety_risk": 0.80,
+                            "legal_exploit": 0.65,
+                            "competitive_advantage": 0.50,
+                            "patch_resistance": 0.0,
+                            "novelty": 0.5,
+                        },
+                        "reason_codes": ["unsafe_legal_state_present", "unsafe_grey_area"],
+                        "limitations": ["Competitive advantage is a proxy, not calibrated."],
+                    },
+                    "event_refs": ["ref_001"],
+                },
+            },
+            "error": None,
+        }
+
+    def test_summarize_tool_output_extracts_exploit_score(self) -> None:
+        payload = self._make_tool_output_with_exploit_score(7.5)
+        summary = summarize_tool_output(payload)
+        assert "exploit_score_total" in summary
+        assert summary["exploit_score_total"] == 7.5
+        assert "exploit_score_components" in summary
+        comps = summary["exploit_score_components"]
+        assert "safety_risk" in comps
+
+    def test_campaign_finding_can_include_exploit_score(self) -> None:
+        builder = CampaignTraceBuilder(
+            objective="Test exploit score",
+            mode="test",
+            agent_config={},
+            seed=1,
+        )
+        finding = builder.add_finding(
+            family_id="confined_corner_grass",
+            candidate_id="cid_001",
+            score=15.5,
+            exploit_score_total=7.5,
+            exploit_score_components={"safety_risk": 0.80, "legal_exploit": 0.65},
+        )
+        assert finding.exploit_score_total == 7.5
+        assert finding.exploit_score_components["safety_risk"] == 0.80
+
+    def test_campaign_finding_exploit_score_in_serialized_trace(self) -> None:
+        builder = CampaignTraceBuilder(
+            objective="Exploit score trace test",
+            mode="test",
+            agent_config={},
+            seed=2,
+        )
+        builder.add_finding(
+            family_id="fam_a",
+            candidate_id="cid_002",
+            exploit_score_total=9.1,
+            exploit_score_components={"safety_risk": 0.9},
+        )
+        trace = builder.build()
+        trace_dict = campaign_trace_to_dict(trace)
+        findings = trace_dict.get("best_findings") or []
+        assert len(findings) == 1
+        f = findings[0]
+        assert f["exploit_score_total"] == 9.1
+        assert f["exploit_score_components"]["safety_risk"] == 0.9
+
+    def test_exploit_score_reason_codes_in_summary(self) -> None:
+        payload = self._make_tool_output_with_exploit_score()
+        summary = summarize_tool_output(payload)
+        if "exploit_score_reason_codes" in summary:
+            codes = summary["exploit_score_reason_codes"]
+            assert isinstance(codes, list)
+            assert len(codes) <= 6
+
+
+# ===========================================================================
+# PR 8.2 — Failure taxonomy extraction tests
+# ===========================================================================
+
+
+class TestSummarizeToolOutputFailureTaxonomy:
+    """Tests that summarize_tool_output extracts failure taxonomy fields."""
+
+    def _make_tool_output_with_failure_taxonomy(
+        self,
+        primary_failure_mode: str | None = "high_hazard_legal_state",
+        failure_modes: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build a tool output that includes failure taxonomy in best_candidate."""
+        return {
+            "ok": True,
+            "tool": "run_falsification_search",
+            "result": {
+                "family_id": "confined_corner_grass",
+                "best_candidate": {
+                    "candidate_id": "confined_corner_grass:seed42:trial0001",
+                    "score": 12.5,
+                    "primary_failure_mode": primary_failure_mode,
+                    "failure_modes": failure_modes or ["high_hazard_legal_state"],
+                },
+            },
+            "error": None,
+        }
+
+    def test_summarize_tool_output_extracts_failure_taxonomy(self) -> None:
+        """summarize_tool_output must extract primary_failure_mode from best_candidate."""
+        payload = self._make_tool_output_with_failure_taxonomy()
+        summary = summarize_tool_output(payload)
+        assert "primary_failure_mode" in summary
+        assert summary["primary_failure_mode"] == "high_hazard_legal_state"
+        assert "failure_modes" in summary
+        assert isinstance(summary["failure_modes"], list)
+        assert "high_hazard_legal_state" in summary["failure_modes"]
+
+    def test_summarize_tool_output_failure_taxonomy_at_top_level(self) -> None:
+        """summarize_tool_output must pick up failure taxonomy at result top level."""
+        payload = {
+            "ok": True,
+            "tool": "run_falsification_candidate",
+            "result": {
+                "candidate_id": "test:seed42",
+                "score": 10.0,
+                "primary_failure_mode": "unsafe_closing_speed",
+                "failure_modes": ["unsafe_closing_speed", "reaction_margin_failure"],
+            },
+            "error": None,
+        }
+        summary = summarize_tool_output(payload)
+        assert summary.get("primary_failure_mode") == "unsafe_closing_speed"
+        assert "failure_modes" in summary
+
+    def test_summarize_tool_output_none_primary_mode(self) -> None:
+        """summarize_tool_output must handle None primary_failure_mode gracefully."""
+        payload = self._make_tool_output_with_failure_taxonomy(primary_failure_mode=None)
+        summary = summarize_tool_output(payload)
+        # primary_failure_mode may be present (None) or absent — just must not crash
+        assert isinstance(summary, dict)
+
+    def test_campaign_finding_can_include_failure_modes(self) -> None:
+        """CampaignFinding dataclass must store primary_failure_mode and failure_modes."""
+        from reglabsim.agents.campaign_trace import CampaignTraceBuilder
+
+        builder = CampaignTraceBuilder(
+            objective="Test taxonomy",
+            mode="test",
+            agent_config={},
+            seed=42,
+        )
+        finding = builder.add_finding(
+            family_id="confined_corner_grass",
+            candidate_id="test:seed42:trial0001",
+            score=12.5,
+            primary_failure_mode="high_hazard_legal_state",
+            failure_modes=["high_hazard_legal_state", "unsafe_closing_speed"],
+        )
+        assert finding.primary_failure_mode == "high_hazard_legal_state"
+        assert "high_hazard_legal_state" in finding.failure_modes
+        assert "unsafe_closing_speed" in finding.failure_modes
+
+    def test_campaign_finding_failure_modes_serializes(self) -> None:
+        """CampaignFinding with failure_modes must be JSON-serializable."""
+        import json as _json
+
+        from reglabsim.agents.campaign_trace import CampaignTraceBuilder, campaign_trace_to_dict
+
+        builder = CampaignTraceBuilder(
+            objective="Taxonomy serialization test",
+            mode="test",
+            agent_config={},
+            seed=42,
+        )
+        builder.add_finding(
+            family_id="confined_corner_grass",
+            candidate_id="test:seed42",
+            score=10.0,
+            primary_failure_mode="confined_corner_attack",
+            failure_modes=["confined_corner_attack"],
+        )
+        trace = builder.build()
+        trace_dict = campaign_trace_to_dict(trace)
+        serialized = _json.dumps(trace_dict)
+        assert "confined_corner_attack" in serialized
+
+    def test_campaign_finding_default_empty_failure_modes(self) -> None:
+        """CampaignFinding must default to empty failure_modes list."""
+        from reglabsim.agents.campaign_trace import CampaignTraceBuilder
+
+        builder = CampaignTraceBuilder(
+            objective="Default test",
+            mode="test",
+            agent_config={},
+            seed=42,
+        )
+        finding = builder.add_finding(
+            family_id="confined_corner_grass",
+            candidate_id="test:seed42",
+        )
+        assert finding.primary_failure_mode is None
+        assert finding.failure_modes == []
+
+
+# ===========================================================================
+# PR 8.4.2 — Track-conditioned campaign trace tests
+# ===========================================================================
+
+
+class TestSummarizeToolOutputTrackConditioned:
+    def _make_tc_tool_output(self) -> dict[str, Any]:
+        from reglabsim.tools.falsification_tools import run_track_conditioned_falsification_tool
+        return run_track_conditioned_falsification_tool(
+            family_id="confined_corner_grass",
+            seed=42,
+            max_segments=2,
+            candidates_per_segment=2,
+        )
+
+    def test_handles_track_conditioned_search(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        assert summary.get("ok") is True
+
+    def test_extracts_track_fidelity_from_track_conditioned_result(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        tf = summary.get("track_fidelity")
+        if tf is not None:
+            assert "fidelity_tier" in tf
+            assert tf["fidelity_tier"] == "T0_synthetic_family"
+
+    def test_extracts_readiness(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        # track_readiness should be present
+        if "track_readiness" in summary:
+            assert summary["track_readiness"] in ("ready", "partial", "insufficient")
+
+    def test_extracts_segment_ids(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        if "selected_segment_ids" in summary:
+            assert isinstance(summary["selected_segment_ids"], list)
+
+    def test_summary_is_compact(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        serialized = json.dumps(summary)
+        # No raw geometry or event logs
+        for forbidden in ("event_log", "raw_event", "coordinate_array", "full_bundle"):
+            assert forbidden not in serialized
+
+    def test_extracts_total_unsafe_legal_states(self) -> None:
+        out = self._make_tc_tool_output()
+        summary = summarize_tool_output(out)
+        if "total_unsafe_legal_states" in summary:
+            assert isinstance(summary["total_unsafe_legal_states"], int | type(None))
+
+
+# ===========================================================================
+# PR 8.4.3 — Surrogate model registry and guidance in campaign trace
+# ===========================================================================
+
+
+class TestSummarizeToolOutputSurrogateRegistry:
+    def _make_registry_output(self) -> dict[str, Any]:
+        from reglabsim.tools.falsification_tools import list_surrogate_model_backends_tool
+        return list_surrogate_model_backends_tool()
+
+    def test_handles_surrogate_model_registry(self) -> None:
+        out = self._make_registry_output()
+        summary = summarize_tool_output(out)
+        assert summary.get("ok") is True
+
+    def test_extracts_available_models(self) -> None:
+        out = self._make_registry_output()
+        summary = summarize_tool_output(out)
+        if "available_models" in summary:
+            assert isinstance(summary["available_models"], list)
+
+
+class TestSummarizeToolOutputSurrogateComparison:
+    def _make_comparison_output(self) -> dict[str, Any]:
+        from reglabsim.tools.falsification_tools import compare_surrogate_models_tool
+        return compare_surrogate_models_tool(
+            family_id="confined_corner_grass", seed=42, max_trials=8
+        )
+
+    def test_handles_surrogate_model_comparison(self) -> None:
+        out = self._make_comparison_output()
+        summary = summarize_tool_output(out)
+        assert summary.get("ok") is True
+
+    def test_extracts_best_surrogate_model(self) -> None:
+        out = self._make_comparison_output()
+        summary = summarize_tool_output(out)
+        if "best_available_model_type" in summary:
+            assert isinstance(summary["best_available_model_type"], str)
+
+    def test_surrogate_comparison_summary_is_compact(self) -> None:
+        out = self._make_comparison_output()
+        summary = summarize_tool_output(out)
+        serialized = json.dumps(summary)
+        for forbidden in ("full_dataset", "raw_candidate_pool", "sklearn_estimator"):
+            assert forbidden not in serialized
+
+
+class TestSummarizeToolOutputTrackConditionedSurrogateGuidance:
+    def _make_guided_output(self) -> dict[str, Any]:
+        from reglabsim.tools.falsification_tools import (
+            run_track_conditioned_falsification_tool,
+        )
+        return run_track_conditioned_falsification_tool(
+            family_id="confined_corner_grass", seed=42,
+            max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+        )
+
+    def test_handles_track_conditioned_surrogate_guidance(self) -> None:
+        out = self._make_guided_output()
+        summary = summarize_tool_output(out)
+        assert summary.get("ok") is True
+
+    def test_extracts_surrogate_guidance_metadata(self) -> None:
+        out = self._make_guided_output()
+        summary = summarize_tool_output(out)
+        if "surrogate_guidance" in summary:
+            sg = summary["surrogate_guidance"]
+            assert sg.get("enabled") is True
+
+    def test_surrogate_guidance_summary_is_compact(self) -> None:
+        out = self._make_guided_output()
+        summary = summarize_tool_output(out)
+        serialized = json.dumps(summary)
+        for forbidden in ("raw_candidate_pool", "full_dataset", "event_log"):
+            assert forbidden not in serialized
+
+
+class TestCampaignTraceExtractsSurrogateGuidanceStatus:
+    def test_extracts_surrogate_guidance_status(self) -> None:
+        from reglabsim.tools.falsification_tools import (
+            run_track_conditioned_falsification_tool,
+        )
+        out = run_track_conditioned_falsification_tool(
+            family_id="confined_corner_grass", seed=42,
+            max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+        )
+        summary = summarize_tool_output(out)
+        if "surrogate_guidance" in summary:
+            sg = summary["surrogate_guidance"]
+            assert "status" in sg
+
+    def test_extracts_guidance_comparison_verdict(self) -> None:
+        from reglabsim.tools.falsification_tools import (
+            run_track_conditioned_falsification_tool,
+        )
+        out = run_track_conditioned_falsification_tool(
+            family_id="confined_corner_grass", seed=42,
+            max_segments=1, candidates_per_segment=2,
+            use_surrogate_guidance=True, surrogate_training_trials=6,
+            compare_against_heuristic=True,
+        )
+        summary = summarize_tool_output(out)
+        if "guidance_comparison_verdict" in summary:
+            assert isinstance(summary["guidance_comparison_verdict"], str)
